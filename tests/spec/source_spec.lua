@@ -152,9 +152,11 @@ describe("source module", function()
       local original_require = require
       _G.require = function(name)
         if name == "lazy" then
-          return { plugins = function()
-            return {}
-          end }
+          return {
+            plugins = function()
+              return {}
+            end,
+          }
         end
         return original_require(name)
       end

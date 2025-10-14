@@ -143,7 +143,6 @@ function M.check()
             "Create a `plugins/` or `lua/plugins/` directory and add your plugin specifications there",
           })
         end
-
       else
         error(("  [%d] `%s` (does not exist)"):format(i, dir), {
           "Please ensure the directory exists",

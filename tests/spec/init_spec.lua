@@ -43,16 +43,16 @@ describe("super_lazy init module", function()
 
       -- Create test plugin files
       vim.fn.writefile({
-        'return {',
+        "return {",
         '  { "folke/lazy.nvim" },',
         '  { "nvim-lua/plenary.nvim" },',
-        '}',
+        "}",
       }, repo1 .. "/plugins/core.lua")
 
       vim.fn.writefile({
-        'return {',
+        "return {",
         '  { "folke/tokyonight.nvim" },',
-        '}',
+        "}",
       }, repo2 .. "/plugins/theme.lua")
 
       -- Setup super_lazy with two repos
