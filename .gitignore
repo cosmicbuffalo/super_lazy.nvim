@@ -1,0 +1,9 @@
+*.swp
+*.swo
+*~
+.DS_Store
+luac.out
+tests/plenary/
+*.log
+.claude
+tmp/

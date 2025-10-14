@@ -1,0 +1,183 @@
+*super_lazy.txt*  Multi lockfile management for lazy.nvim
+
+Author:  Nick deLannoy
+License: MIT
+Version: 1.0.0
+
+==============================================================================
+CONTENTS                                                *super_lazy-contents*
+
+    1. Introduction ........................... |super_lazy-introduction|
+    2. Requirements ........................... |super_lazy-requirements|
+    3. Installation ........................... |super_lazy-installation|
+    4. Configuration .......................... |super_lazy-configuration|
+    5. Usage .................................. |super_lazy-usage|
+    6. Troubleshooting ........................ |super_lazy-troubleshooting|
+
+==============================================================================
+1. INTRODUCTION                                     *super_lazy-introduction*
+
+super_lazy.nvim extends lazy.nvim to support multiple lockfiles, enabling
+separation of shared and personal plugin configurations across multiple
+repositories.
+
+Features:
+  • Multi Lockfile Management - Maintain separate lazy-lock.json files
+  • Source Detection - Intelligent repository detection for each plugin
+  • UI Integration - Enhanced lazy.nvim UI showing plugin sources
+  • Recipe Support - Handles plugins defined in other plugins' lazy.lua files
+  • Version Compatibility - Ensures compatibility with lazy.nvim
+  • Smart Caching - Optimized performance through intelligent caching
+
+==============================================================================
+2. REQUIREMENTS                                     *super_lazy-requirements*
+
+  • Neovim >= 0.8.0
+  • lazy.nvim == 11.17.1
+
+==============================================================================
+3. INSTALLATION                                     *super_lazy-installation*
+
+Using lazy.nvim:
+>lua
+    {
+      "cosmicbuffalo/super_lazy.nvim",
+      lazy = false,
+      opts = {
+        -- Configuration options (see |super_lazy-configuration|)
+      }
+    }
+<
+
+==============================================================================
+4. CONFIGURATION                                   *super_lazy-configuration*
+
+Default configuration:
+>lua
+    opts = {
+      -- List of directories where lockfiles should be written
+      lockfile_repo_dirs = { vim.fn.stdpath("config") },
+    }
+<
+
+Example with multiple repositories:
+>lua
+    opts = {
+      lockfile_repo_dirs = {
+        vim.fn.stdpath("config"),
+        vim.fn.stdpath("config") .. "/lua/personal",
+      },
+    }
+<
+
+                                              *super_lazy-lockfile_repo_dirs*
+lockfile_repo_dirs ~
+    Type: `table` of `string`
+    Default: `{ vim.fn.stdpath("config") }`
+
+    List of directories where lockfiles should be written. Each directory
+    should contain plugin specifications in a `plugins/` subdirectory.
+
+==============================================================================
+5. USAGE                                                   *super_lazy-usage*
+
+Directory Structure ~
+
+Organize your plugins in nested directories, ensuring that any nested plugin
+directories are added to the lazy initializer:
+>
+    ~/.config/nvim/              (main config repo)
+    ├── init.lua
+    ├── lazy-lock.json           (auto-generated)
+    └── lua/
+        ├── plugins/             (main plugin dir)
+        │   └── foo.lua
+        └── personal/            (nested repo)
+            ├── plugins/         (nested plugin dir)
+            │   └── bar.lua
+            └── lazy-lock.json   (auto-generated)
+
+
+Plugin Specifications ~
+
+Ensure that nested plugin spec directories are loaded by lazy:
+>lua
+ -- ~/.config/nvim/init.lua
+ -- see lazy.nvim documentation for full bootstrap setup
+ require("lazy").setup({
+    spec = {
+      { import = "plugins" },
+      -- add plugin directories of nested repos
+      { import = "personal.plugins" }
+    }
+  })   
+<
+
+Super Lazy Configuration ~
+
+Ensure that both repos are configured in `lockfile_repo_dirs` in the
+`super_lazy` plugin spec:
+
+>lua
+  {
+    "cosmicbuffalo/super_lazy.nvim",
+    lazy = false,
+    opts = {
+      lockfile_repo_dirs = {
+        vim.fn.stdpath("config"),
+        vim.fn.stdpath("config") .. "/lua/personal",
+      },
+    }
+  }
+<
+
+How It Works ~
+
+1. Hook Integration - Hooks into lazy.nvim's lockfile update mechanism
+2. Source Detection - Determines which repository each plugin belongs to
+3. Lockfile Generation - Writes separate lockfiles to each repository
+4. UI Enhancement - Shows the source repository in the lazy.nvim UI
+
+==============================================================================
+6. TROUBLESHOOTING                               *super_lazy-troubleshooting*
+
+Health Check ~
+                                                     *super_lazy-health-check*
+Run the health check to verify your setup:
+>vim
+    :checkhealth super_lazy
+<
+
+The health check verifies:
+  • Neovim version compatibility
+  • lazy.nvim installation and version
+  • Configuration validity
+  • Repository directory structure
+  • Plugin file detection
+
+Version Compatibility ~
+
+super_lazy.nvim requires lazy.nvim version 11.17.1. Use `:checkhealth super_lazy`
+to verify your lazy.nvim version and get specific guidance if there's a mismatch.
+
+Plugin Not Found Error ~
+
+If you get:
+>
+    Plugin 'plugin-name' not found in any configured lockfile repository
+<
+
+Ensure:
+  1. The plugin is defined in one of your lockfile_repo_dirs
+  2. The plugin file is in a plugins/ directory
+  3. The plugin specification follows the correct format
+
+Clear Caches ~
+
+If you experience unexpected behavior after configuration changes:
+>lua
+    require("super_lazy.cache").clear_all()
+<
+
+==============================================================================
+vim:tw=78:ts=8:ft=help:norl:
