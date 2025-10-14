@@ -4,7 +4,7 @@ local Util = require("super_lazy.util")
 local M = {}
 
 -- This function is a direct copy of the internals of lazy.view.render.details
-local function insert_lazy_props(props, plugin)
+local function insert_lazy_props(self, props, plugin)
   local LazyGit = require("lazy.manage.git")
   local LazyUtil = require("lazy.util")
 
@@ -78,7 +78,7 @@ function M.setup_hooks()
         table.insert(props, { "source", source_info, "LazyReasonEvent" })
 
         -- Put in all the same properties as the original details function
-        insert_lazy_props(props, plugin)
+        insert_lazy_props(self, props, plugin)
 
         self:props(props, { indent = 6 })
         self:nl()
