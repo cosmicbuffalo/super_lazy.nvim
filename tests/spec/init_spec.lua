@@ -182,10 +182,7 @@ describe("super_lazy init module", function()
 
       -- Run headless nvim command with timeout
       local start_time = vim.fn.reltime()
-      local cmd = string.format(
-        "timeout 5 nvim --headless -u %s -c 'qall!' 2>&1",
-        init_file
-      )
+      local cmd = string.format("timeout 5 nvim --headless -u %s -c 'qall!' 2>&1", init_file)
       local output = vim.fn.system(cmd)
       local exit_code = vim.v.shell_error
       local elapsed = vim.fn.reltimefloat(vim.fn.reltime(start_time))
