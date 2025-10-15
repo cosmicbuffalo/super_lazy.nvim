@@ -71,9 +71,13 @@ function M.setup_hooks()
 
         -- Add our source information at the top
         local source_info = "unknown"
-        local source_ok, result = pcall(Source.get_plugin_source, plugin.name, true)
+        local source_ok, repo_path, parent = pcall(Source.get_plugin_source, plugin.name, true)
         if source_ok then
-          source_info = result
+          if parent then
+            source_info = repo_path .. " (" .. parent .. ")"
+          else
+            source_info = repo_path
+          end
         end
         table.insert(props, { "source", source_info, "LazyReasonEvent" })
 

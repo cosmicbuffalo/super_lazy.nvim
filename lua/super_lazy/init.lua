@@ -14,13 +14,20 @@ local M = {}
 function M.setup(user_config)
   Config.setup(user_config)
 
-  if #vim.api.nvim_list_uis() == 0 then -- headless mode
-    M.setup_lazy_hooks()
-  else
-    vim.schedule(function()
-      M.setup_lazy_hooks()
-    end)
-  end
+  M.setup_lazy_hooks()
+  M.ensure_lockfiles_updated()
+end
+
+function M.ensure_lockfiles_updated()
+  -- Write lockfiles asynchronously to handle any plugins that were installed
+  -- before our hooks were set up (e.g., during initial lazy.nvim install)
+  -- Scheduled to avoid blocking startup
+  vim.schedule(function()
+    local ok, err = pcall(M.write_lockfiles)
+    if not ok then
+      Util.notify("Error updating lockfiles after setup: " .. tostring(err), vim.log.levels.ERROR)
+    end
+  end)
 end
 
 local function get_cached_git_info(plugin_dir, plugin_name)
@@ -69,7 +76,7 @@ function M.write_lockfiles()
   end
 
   for _, plugin in pairs(all_plugins) do
-    local source_repo = Source.get_plugin_source(plugin.name)
+    local source_repo, parent_plugin = Source.get_plugin_source(plugin.name, true)
     local lockfile_entry = nil
 
     if plugin._ and plugin._.installed then
@@ -79,6 +86,10 @@ function M.write_lockfiles()
           branch = git_info.branch,
           commit = git_info.commit,
         }
+        if parent_plugin then
+          -- add source for nested plugins
+          lockfile_entry.source = parent_plugin
+        end
       end
     else
       -- For disabled plugins, use existing lockfile entry if available
@@ -93,29 +104,107 @@ function M.write_lockfiles()
     end
   end
 
+  -- Preserve nested plugins whose parent is still in the lockfile
+  -- This handles the case where a recipe plugin (parent) is disabled
+  for source_repo, plugins in pairs(plugins_by_source) do
+    local lockfile_path = source_repo .. "/lazy-lock.json"
+    local existing_repo_lockfile = Lockfile.read(lockfile_path)
+
+    for plugin_name, plugin_entry in pairs(existing_repo_lockfile) do
+      if not plugins[plugin_name] then
+        if plugin_entry.source then
+          if plugins[plugin_entry.source] then
+            plugins[plugin_name] = plugin_entry
+          end
+        end
+      end
+    end
+  end
+
   for source_repo, plugins in pairs(plugins_by_source) do
     local lockfile_path = source_repo .. "/lazy-lock.json"
     Lockfile.write(lockfile_path, plugins)
   end
 end
 
+-- This function restores plugins that were uninstalled and removed
+-- from the lockfile but are still present in the config
+function M.restore_cleaned_plugins(pre_clean_lockfiles)
+  local repo_paths = Source.get_lockfile_repo_paths()
+
+  for _, repo_path in ipairs(repo_paths) do
+    local lockfile_path = repo_path .. "/lazy-lock.json"
+    local current_lockfile = Lockfile.read(lockfile_path)
+    local pre_clean_lockfile = pre_clean_lockfiles[repo_path] or {}
+
+    for plugin_name, plugin_entry in pairs(pre_clean_lockfile) do
+      if not current_lockfile[plugin_name] then
+        local should_keep = false
+
+        local ok, result = pcall(Source.get_plugin_source, plugin_name)
+        if ok and result == repo_path then
+          should_keep = true
+        end
+
+        if not should_keep and plugin_entry.source then
+          if current_lockfile[plugin_entry.source] then
+            should_keep = true
+          end
+        end
+
+        if should_keep then
+          current_lockfile[plugin_name] = plugin_entry
+        end
+      end
+    end
+
+    Lockfile.write(lockfile_path, current_lockfile)
+  end
+end
+
 function M.setup_lazy_hooks()
   local ok, err = pcall(function()
     local original_update = LazyLock.update
+    local pre_clean_lockfiles = {}
 
     -- Override lazy's lockfile update function with error handling
     LazyLock.update = function()
       local original_ok, original_err = pcall(original_update)
       if not original_ok then
-        Util.notify("Error in original lazy update: " .. tostring(original_err), vim.log.levels.ERROR)
-        return -- Don't try our custom logic if original failed
+        Util.notify("Error in lazy update: " .. tostring(original_err), vim.log.levels.ERROR)
+        return -- Don't try additional lockfile handling if lazy update failed
       end
 
       local lockfile_ok, lockfile_err = pcall(M.write_lockfiles)
       if not lockfile_ok then
         Util.notify("Error managing lockfiles: " .. tostring(lockfile_err), vim.log.levels.ERROR)
       end
+
+      -- After LazyLock.update completes during clean, restore entries for plugins still in config
+      if next(pre_clean_lockfiles) ~= nil then
+        local restore_ok, restore_err = pcall(M.restore_cleaned_plugins, pre_clean_lockfiles)
+        if not restore_ok then
+          Util.notify("Error restoring cleaned plugins: " .. tostring(restore_err), vim.log.levels.ERROR)
+        end
+        pre_clean_lockfiles = {} -- Clear the state
+      end
     end
+
+    -- Hook into clean operations to capture lockfile state before clean
+    vim.api.nvim_create_autocmd("User", {
+      pattern = "LazyCleanPre",
+      callback = function()
+        -- Capture lockfile state before clean
+        pre_clean_lockfiles = {}
+        local repo_paths_ok, repo_paths = pcall(Source.get_lockfile_repo_paths)
+        if repo_paths_ok then
+          for _, repo_path in ipairs(repo_paths) do
+            local lockfile_path = repo_path .. "/lazy-lock.json"
+            pre_clean_lockfiles[repo_path] = Lockfile.read(lockfile_path)
+          end
+        end
+      end,
+    })
 
     -- Also hook into the lazy TUI to show shared/personal status (with error handling)
     local ui_ok, ui_err = pcall(UI.setup_hooks)

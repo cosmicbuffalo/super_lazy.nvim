@@ -158,6 +158,9 @@ function M.get_plugin_source(plugin_name, with_recipe)
 
   if plugin_name == "lazy.nvim" then
     -- Return the first repo path for lazy.nvim
+    if with_recipe then
+      return repo_paths[1] or vim.fn.stdpath("config"), nil
+    end
     return repo_paths[1] or vim.fn.stdpath("config")
   end
 
@@ -165,6 +168,9 @@ function M.get_plugin_source(plugin_name, with_recipe)
   for _, repo_path in ipairs(repo_paths) do
     -- Step 1: Check if plugin exists directly in this repo
     if plugin_exists_in_repo(plugin_name, repo_path) then
+      if with_recipe then
+        return repo_path, nil
+      end
       return repo_path
     end
 
@@ -172,7 +178,7 @@ function M.get_plugin_source(plugin_name, with_recipe)
     local recipe_plugin = find_plugin_in_recipe(plugin_name, repo_path)
     if recipe_plugin then
       if with_recipe then
-        return repo_path .. " (" .. recipe_plugin .. ")"
+        return repo_path, recipe_plugin
       end
       return repo_path
     end

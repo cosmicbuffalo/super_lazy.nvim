@@ -33,7 +33,11 @@ function M.write(path, data)
     f:write("{\n")
     for n, name in ipairs(names) do
       local info = data[name]
-      f:write(([[  %q: { "branch": %q, "commit": %q }]]):format(name, info.branch, info.commit))
+      if info.source then
+        f:write(([[  %q: { "branch": %q, "commit": %q, "source": %q }]]):format(name, info.branch, info.commit, info.source))
+      else
+        f:write(([[  %q: { "branch": %q, "commit": %q }]]):format(name, info.branch, info.commit))
+      end
       if n ~= #names then
         f:write(",\n")
       end
