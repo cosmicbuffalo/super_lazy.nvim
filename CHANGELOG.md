@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2025-10-15
+
+### Added
+- **Recipe Plugin Metadata**: Added `source` field to lockfile entries for recipe plugins (plugins defined in lazy.lua files of other plugins), tracking parent-child relationships
+- **Clean Operation**: Added hooks into lazy.nvim clean operation to restore lockfile entries for plugins still in config but cleaned from disk
+- **Initial Install Support**: Lockfiles are now updated asynchronously after plugin setup to handle plugins installed before super_lazy loads, fixing issues with initial lazy.nvim install operations
+- **Headless Execution Test**: Added test coverage to ensure headless nvim commands don't hang or timeout
+
+### Changed
+- **Enhanced Source Detection**: `get_plugin_source()` now returns both repository path and parent plugin name when requested, enabling better recipe plugin tracking
+- **Disabled Plugin Preservation**: Disabled plugins now correctly remain in lockfiles with their commit information preserved
+- **Nested Plugin Preservation**: When a recipe plugin (parent) is disabled, its nested child plugins are now correctly preserved in lockfiles as long as the parent exists
+
 ## [0.1.1] - 2025-10-14
 
 Hotfix for minor bug
