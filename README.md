@@ -100,6 +100,18 @@ For each plugin, super_lazy.nvim:
 3. For plugins defined in recipes (other plugins' `lazy.lua` files), tracks the parent plugin
 4. Assigns the plugin to the first matching repository
 
+### Known Limitations
+
+This plugin essentially works by piggybacking on top of the existing `lazy.nvim` plugin manager's functionality and stepping in after the main repo's lockfile has been updated by `lazy.nvim` to layer on logic around splitting the lockfile across multiple repos. Due to this, there are some known limitations in behavior of this plugin:
+
+- `Lazy` expects one plugin to have one version
+  - Plugins that exist in multiple config repos with different versions are not handled by Lazy - only the version in the main config repo will be visible to Lazy on restore, and only the installed version will be written to lockfiles on updates
+- `Lazy` only reads the main config repo's lockfile for restore operations
+  - For any plugins located in additional config repos, they will be updated to the latest commit on their configured branch during a restore operation instead of to the version in their respective config repo's lockfile
+
+> [!NOTE]
+> These limitations may be solveable by `super_lazy.nvim`, but the current state of this plugin does not address these limitations. 
+
 ## Troubleshooting
 
 ### Health Check
