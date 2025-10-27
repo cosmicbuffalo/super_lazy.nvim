@@ -11,21 +11,58 @@ local LazyLock = require("lazy.manage.lock")
 
 local M = {}
 
+-- Check if main lockfile is newer than our split lockfiles
+-- This detects when lazy.nvim updated the main lockfile 
+-- before our hooks were set up
+local function needs_lockfile_sync()
+  local main_lockfile = LazyConfig.options.lockfile
+  local main_stat = vim.loop.fs_stat(main_lockfile)
+
+  -- If main lockfile doesn't exist, nothing to sync
+  if not main_stat then
+    return false
+  end
+
+  local main_mtime = main_stat.mtime.sec
+
+  -- Check each of our split lockfiles
+  local repo_paths = Source.get_lockfile_repo_paths()
+  for _, repo_path in ipairs(repo_paths) do
+    local lockfile_path = repo_path .. "/lazy-lock.json"
+    local stat = vim.loop.fs_stat(lockfile_path)
+
+    -- If our lockfile doesn't exist, we need to sync
+    if not stat then
+      return true
+    end
+
+    -- If main lockfile is newer than our lockfile, we need to sync
+    if main_mtime > stat.mtime.sec then
+      return true
+    end
+  end
+
+  -- All lockfiles are in sync
+  return false
+end
+
+local function ensure_lockfiles_updated()
+  local ok, err = pcall(M.write_lockfiles)
+  if not ok then
+    Util.notify("Error updating lockfiles after setup: " .. tostring(err), vim.log.levels.ERROR)
+  end
+end
+
 function M.setup(user_config)
   Config.setup(user_config)
 
   M.setup_lazy_hooks()
-  M.ensure_lockfiles_updated()
-end
 
-function M.ensure_lockfiles_updated()
-  -- Write lockfiles asynchronously to handle any plugins that were installed
-  -- before our hooks were set up (e.g., during initial lazy.nvim install)
-  -- Scheduled to avoid blocking startup
+  -- Check if lazy.nvim updated the main lockfile before our hooks were set up
+  -- (e.g., during bootstrap/initial install). Only sync if timestamps indicate it's needed.
   vim.schedule(function()
-    local ok, err = pcall(M.write_lockfiles)
-    if not ok then
-      Util.notify("Error updating lockfiles after setup: " .. tostring(err), vim.log.levels.ERROR)
+    if needs_lockfile_sync() then
+      ensure_lockfiles_updated()
     end
   end)
 end
@@ -75,9 +112,18 @@ function M.write_lockfiles()
     end
   end
 
+  -- Build the plugin source cache while processing plugins
+  local plugin_source_map = {}
+
   for _, plugin in pairs(all_plugins) do
     local source_repo, parent_plugin = Source.get_plugin_source(plugin.name, true)
     local lockfile_entry = nil
+
+    -- Cache the plugin source mapping
+    plugin_source_map[plugin.name] = {
+      repo = source_repo,
+      parent = parent_plugin,
+    }
 
     if plugin._ and plugin._.installed then
       local git_info = get_cached_git_info(plugin.dir, plugin.name)
@@ -104,6 +150,9 @@ function M.write_lockfiles()
     end
   end
 
+  -- Update the persistent cache with all plugin sources
+  Cache.set_all_plugin_sources(plugin_source_map)
+
   -- Preserve nested plugins whose parent is still in the lockfile
   -- This handles the case where a recipe plugin (parent) is disabled
   for source_repo, plugins in pairs(plugins_by_source) do
@@ -111,12 +160,8 @@ function M.write_lockfiles()
     local existing_repo_lockfile = Lockfile.read(lockfile_path)
 
     for plugin_name, plugin_entry in pairs(existing_repo_lockfile) do
-      if not plugins[plugin_name] then
-        if plugin_entry.source then
-          if plugins[plugin_entry.source] then
-            plugins[plugin_name] = plugin_entry
-          end
-        end
+      if not plugins[plugin_name] and plugin_entry.source and plugins[plugin_entry.source] then
+        plugins[plugin_name] = plugin_entry
       end
     end
   end
@@ -127,9 +172,9 @@ function M.write_lockfiles()
   end
 end
 
--- This function restores plugins that were uninstalled and removed
--- from the lockfile but are still present in the config
-function M.restore_cleaned_plugins(pre_clean_lockfiles)
+-- Restores plugins that were uninstalled and removed from the lockfile
+-- but are still present in the config
+local function restore_cleaned_plugins(pre_clean_lockfiles)
   local repo_paths = Source.get_lockfile_repo_paths()
 
   for _, repo_path in ipairs(repo_paths) do
@@ -182,7 +227,7 @@ function M.setup_lazy_hooks()
 
       -- After LazyLock.update completes during clean, restore entries for plugins still in config
       if next(pre_clean_lockfiles) ~= nil then
-        local restore_ok, restore_err = pcall(M.restore_cleaned_plugins, pre_clean_lockfiles)
+        local restore_ok, restore_err = pcall(restore_cleaned_plugins, pre_clean_lockfiles)
         if not restore_ok then
           Util.notify("Error restoring cleaned plugins: " .. tostring(restore_err), vim.log.levels.ERROR)
         end
@@ -206,12 +251,23 @@ function M.setup_lazy_hooks()
       end,
     })
 
-    -- Also hook into the lazy TUI to show shared/personal status (with error handling)
-    local ui_ok, ui_err = pcall(UI.setup_hooks)
-    if not ui_ok then
-      Util.notify("Error setting up UI hooks: " .. tostring(ui_err), vim.log.levels.WARN)
-      -- Continue silently - original lazy UI behavior is preserved
-    end
+    -- Defer UI hooks setup until the Lazy UI is actually opened
+    -- This avoids loading UI code during startup
+    local ui_setup_done = false
+    vim.api.nvim_create_autocmd("User", {
+      pattern = "LazyRender",
+      once = false,
+      callback = function()
+        if not ui_setup_done then
+          ui_setup_done = true
+          local ui_ok, ui_err = pcall(UI.setup_hooks)
+          if not ui_ok then
+            Util.notify("Error setting up UI hooks: " .. tostring(ui_err), vim.log.levels.WARN)
+            -- Continue silently - original lazy UI behavior is preserved
+          end
+        end
+      end,
+    })
   end)
 
   if not ok then

@@ -52,12 +52,6 @@ local function search_file_for_plugin(file_path, patterns)
 end
 
 local function plugin_exists_in_repo(plugin_name, repo_path)
-  local cache_key = plugin_name .. "|" .. repo_path
-  local cached = Cache.get_plugin_exists(cache_key)
-  if cached ~= nil then
-    return cached
-  end
-
   local patterns = create_plugin_patterns(plugin_name)
 
   local files = vim.list_extend(
@@ -92,16 +86,13 @@ local function plugin_exists_in_repo(plugin_name, repo_path)
   end
   files = filtered_files
 
-  local result = false
   for _, file in ipairs(files) do
     if search_file_for_plugin(file, patterns) then
-      result = true
-      break
+      return true
     end
   end
 
-  Cache.set_plugin_exists(cache_key, result)
-  return result
+  return false
 end
 
 local function get_lazy_plugins()
@@ -122,17 +113,9 @@ end
 
 -- Find a plugin in the lazy.lua files of installed plugins
 local function find_plugin_in_recipe(plugin_name, repo_path)
-  local cache_key = plugin_name .. "|" .. repo_path
-  local cached = Cache.get_recipe(cache_key)
-  if cached ~= nil then
-    return cached
-  end
-
   local patterns = create_plugin_patterns(plugin_name)
   local installed_plugins = get_lazy_plugins()
   local lazy_path = vim.fn.stdpath("data") .. "/lazy"
-
-  local result = nil
 
   -- Check each installed plugin to see if it exists in the repo and has a lazy.lua file
   for _, plugin in ipairs(installed_plugins) do
@@ -142,15 +125,13 @@ local function find_plugin_in_recipe(plugin_name, repo_path)
       local lazy_file = lazy_path .. "/" .. plugin_dir_name .. "/lazy.lua"
       if vim.fn.filereadable(lazy_file) == 1 then
         if search_file_for_plugin(lazy_file, patterns) then
-          result = plugin_dir_name
-          break
+          return plugin_dir_name
         end
       end
     end
   end
 
-  Cache.set_recipe(cache_key, result)
-  return result
+  return nil
 end
 
 function M.get_plugin_source(plugin_name, with_recipe)
@@ -164,10 +145,26 @@ function M.get_plugin_source(plugin_name, with_recipe)
     return repo_paths[1] or vim.fn.stdpath("config")
   end
 
+  -- Try to get from persistent cache first
+  local cached = Cache.get_plugin_source(plugin_name)
+  if cached then
+    -- Verify the cached repo still exists in our config
+    for _, repo_path in ipairs(repo_paths) do
+      if repo_path == cached.repo then
+        if with_recipe then
+          return cached.repo, cached.parent
+        end
+        return cached.repo
+      end
+    end
+  end
+
+  -- Cache miss or invalid - do the expensive search
   -- For each configured lockfile repo, check in order:
   for _, repo_path in ipairs(repo_paths) do
     -- Step 1: Check if plugin exists directly in this repo
     if plugin_exists_in_repo(plugin_name, repo_path) then
+      Cache.set_plugin_source(plugin_name, repo_path, nil)
       if with_recipe then
         return repo_path, nil
       end
@@ -177,6 +174,7 @@ function M.get_plugin_source(plugin_name, with_recipe)
     -- Step 2: Check if plugin is found inside a lazy.lua file of a plugin in this repo
     local recipe_plugin = find_plugin_in_recipe(plugin_name, repo_path)
     if recipe_plugin then
+      Cache.set_plugin_source(plugin_name, repo_path, recipe_plugin)
       if with_recipe then
         return repo_path, recipe_plugin
       end

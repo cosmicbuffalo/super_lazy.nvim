@@ -268,6 +268,181 @@ describe("super_lazy init module", function()
     end)
   end)
 
+  describe("timestamp-based lockfile sync detection", function()
+    it("should detect when main lockfile is newer than split lockfiles", function()
+      -- Create temporary test directory with TWO repos
+      local test_dir = "/tmp/super_lazy_timestamp_test_" .. os.time()
+      local repo1 = test_dir .. "/repo1"
+      local repo2 = test_dir .. "/repo2"
+      local main_lockfile = repo1 .. "/lazy-lock.json"
+
+      vim.fn.mkdir(repo1 .. "/plugins", "p")
+      vim.fn.mkdir(repo2 .. "/plugins", "p")
+
+      -- Create plugin files in both repos
+      vim.fn.writefile({
+        "return {",
+        '  { "plugin1" },',
+        "}",
+      }, repo1 .. "/plugins/core.lua")
+
+      vim.fn.writefile({
+        "return {",
+        '  { "plugin2" },',
+        "}",
+      }, repo2 .. "/plugins/personal.lua")
+
+      cache.clear_all()
+      local Config = require("super_lazy.config")
+      Config.setup({
+        lockfile_repo_dirs = { repo1, repo2 },
+      })
+
+      local LazyConfig = require("lazy.core.config")
+      local original_lockfile = LazyConfig.options.lockfile
+      LazyConfig.options.lockfile = main_lockfile
+
+      -- Create split lockfiles (older than main)
+      lockfile.write(repo1 .. "/lazy-lock.json", { ["plugin1"] = { branch = "main", commit = "abc123" } })
+      lockfile.write(repo2 .. "/lazy-lock.json", { ["plugin2"] = { branch = "main", commit = "def456" } })
+
+      -- Wait to ensure different timestamp
+      vim.loop.sleep(1000)
+
+      -- Create new main lockfile, simulating lazy update
+      lockfile.write(main_lockfile, {
+        ["plugin1"] = { branch = "main", commit = "abc123" },
+        ["plugin2"] = { branch = "main", commit = "def456" },
+      })
+
+      -- Setup should detect timestamp mismatch and sync
+      local called_write_lockfiles = false
+      local original_schedule = vim.schedule
+      local original_write_lockfiles = super_lazy.write_lockfiles
+      super_lazy.write_lockfiles = function()
+        called_write_lockfiles = true
+        -- Don't actually write lockfiles
+      end
+      vim.schedule = function(fn)
+        fn()
+      end
+
+      super_lazy.setup({ lockfile_repo_dirs = { repo1, repo2 } })
+      -- Verify super_lazy.write_lockfiles was called (which means needs sync returned true)
+      assert.is_true(called_write_lockfiles)
+
+      -- Cleanup
+      vim.schedule = original_schedule
+      super_lazy.write_lockfiles = original_write_lockfiles
+      LazyConfig.options.lockfile = original_lockfile
+      cache.clear_all()
+      vim.fn.delete(test_dir, "rf")
+    end)
+
+    it("should detect when split lockfile is missing", function()
+      local test_dir = "/tmp/super_lazy_missing_test_" .. os.time()
+      local repo1 = test_dir .. "/repo1"
+      local repo2 = test_dir .. "/repo2"
+      local main_lockfile = test_dir .. "/lazy-lock.json"
+
+      vim.fn.mkdir(repo1 .. "/plugins", "p")
+      vim.fn.mkdir(repo2 .. "/plugins", "p")
+
+      cache.clear_all()
+      local Config = require("super_lazy.config")
+      Config.setup({
+        lockfile_repo_dirs = { repo1, repo2 },
+      })
+
+      local LazyConfig = require("lazy.core.config")
+      local original_lockfile = LazyConfig.options.lockfile
+      LazyConfig.options.lockfile = main_lockfile
+
+      -- Create main lockfile and ONE split lockfile, but NOT the other
+      lockfile.write(main_lockfile, {
+        ["plugin1"] = { branch = "main", commit = "abc123" },
+        ["plugin2"] = { branch = "main", commit = "def456" },
+      })
+      lockfile.write(repo1 .. "/lazy-lock.json", { ["plugin1"] = { branch = "main", commit = "abc123" } })
+      -- repo2 lockfile is MISSING
+
+      -- Setup should detect missing split lockfile
+      local called_write_lockfiles = false
+      local original_schedule = vim.schedule
+      local original_write_lockfiles = super_lazy.write_lockfiles
+      super_lazy.write_lockfiles = function()
+        called_write_lockfiles = true
+        -- Don't actually write lockfiles
+      end
+      vim.schedule = function(fn)
+        fn()
+      end
+
+      super_lazy.setup({ lockfile_repo_dirs = { repo1, repo2 } })
+      assert.is_true(called_write_lockfiles)
+
+      -- Cleanup
+      vim.schedule = original_schedule
+      super_lazy.write_lockfiles = original_write_lockfiles
+      LazyConfig.options.lockfile = original_lockfile
+      cache.clear_all()
+      vim.fn.delete(test_dir, "rf")
+    end)
+
+    it("should not sync when lockfiles are already in sync", function()
+      local test_dir = "/tmp/super_lazy_sync_test_" .. os.time()
+      local repo1 = test_dir .. "/repo1"
+      local repo2 = test_dir .. "/repo2"
+      local main_lockfile = test_dir .. "/lazy-lock.json"
+
+      vim.fn.mkdir(repo1 .. "/plugins", "p")
+      vim.fn.mkdir(repo2 .. "/plugins", "p")
+
+      cache.clear_all()
+      local Config = require("super_lazy.config")
+      Config.setup({
+        lockfile_repo_dirs = { repo1, repo2 },
+      })
+
+      local LazyConfig = require("lazy.core.config")
+      local original_lockfile = LazyConfig.options.lockfile
+      LazyConfig.options.lockfile = main_lockfile
+
+      -- Create all lockfiles at the same time (same timestamps, proper content split)
+      local main_data = {
+        ["plugin1"] = { branch = "main", commit = "abc123" },
+        ["plugin2"] = { branch = "main", commit = "def456" },
+      }
+      lockfile.write(main_lockfile, main_data)
+      lockfile.write(repo1 .. "/lazy-lock.json", { ["plugin1"] = { branch = "main", commit = "abc123" } })
+      lockfile.write(repo2 .. "/lazy-lock.json", { ["plugin2"] = { branch = "main", commit = "def456" } })
+
+      -- Setup should NOT trigger sync (lockfiles in sync)
+      local called_write_lockfiles = false
+      local original_schedule = vim.schedule
+      local original_write_lockfiles = super_lazy.write_lockfiles
+      super_lazy.write_lockfiles = function()
+        called_write_lockfiles = true
+        -- Don't actually write lockfiles
+      end
+      vim.schedule = function(fn)
+        fn()
+      end
+
+      super_lazy.setup({ lockfile_repo_dirs = { repo1, repo2 } })
+
+      -- Verify write_lockfiles was NOT called (because lockfiles were in sync)
+      assert.is_false(called_write_lockfiles)
+
+      -- Cleanup
+      vim.schedule = original_schedule
+      super_lazy.write_lockfiles = original_write_lockfiles
+      LazyConfig.options.lockfile = original_lockfile
+      cache.clear_all()
+      vim.fn.delete(test_dir, "rf")
+    end)
+  end)
+
   describe("recipe plugin source metadata", function()
     it("should add source field to nested recipe plugins", function()
       -- Create temporary test directory
@@ -608,7 +783,6 @@ describe("super_lazy init module", function()
 
       vim.fn.mkdir(repo1 .. "/plugins", "p")
 
-      -- Setup super_lazy
       cache.clear_all()
       super_lazy.setup({
         lockfile_repo_dirs = { repo1 },
