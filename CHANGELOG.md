@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2025-10-15
+
+### Added
+- Persistent cache (`~/.cache/nvim/super_lazy/plugin_sources.json`) for plugin source mappings
+- Timestamp-based lockfile sync detection for bootstrap scenarios
+- `setup-plenary` Makefile target for automatic test dependency setup
+- Test coverage for timestamp sync detection and persistent cache
+
+### Changed
+- Startup now near-instant using persistent cache instead of file system searches
+- UI hooks load on-demand when Lazy UI opens
+- Reduced public API to: `setup()`, `write_lockfiles()`, `setup_lazy_hooks()`
+
 ## [0.2.0] - 2025-10-15
 
 ### Added
