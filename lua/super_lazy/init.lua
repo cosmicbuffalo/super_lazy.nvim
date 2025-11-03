@@ -12,7 +12,7 @@ local LazyLock = require("lazy.manage.lock")
 local M = {}
 
 -- Check if main lockfile is newer than our split lockfiles
--- This detects when lazy.nvim updated the main lockfile 
+-- This detects when lazy.nvim updated the main lockfile
 -- before our hooks were set up
 local function needs_lockfile_sync()
   local main_lockfile = LazyConfig.options.lockfile
@@ -21,6 +21,13 @@ local function needs_lockfile_sync()
   -- If main lockfile doesn't exist, nothing to sync
   if not main_stat then
     return false
+  end
+
+  -- Check if main lockfile has uncommitted changes
+  -- This will catch lazy making updates to the main lockfile even if split lockfiles don't exist
+  local git_diff = vim.fn.system({ "git", "diff", "--quiet", "HEAD", main_lockfile })
+  if vim.v.shell_error ~= 0 then
+    return true
   end
 
   local main_mtime = main_stat.mtime.sec
