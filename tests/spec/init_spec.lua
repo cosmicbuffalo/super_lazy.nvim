@@ -546,6 +546,103 @@ describe("super_lazy init module", function()
     end)
   end)
 
+  describe("git-based lockfile preservation", function()
+    it("should restore nested plugins from git lockfile when parent is disabled and not installed", function()
+      local temp_config = vim.fn.tempname()
+      local test_cache_dir = vim.fn.tempname()
+      vim.fn.mkdir(temp_config, "p")
+      vim.fn.mkdir(test_cache_dir, "p")
+
+      vim.fn.system({ "git", "-C", temp_config, "init" })
+      vim.fn.system({ "git", "-C", temp_config, "config", "user.email", "test@test.com" })
+      vim.fn.system({ "git", "-C", temp_config, "config", "user.name", "Test User" })
+
+      local original_lockfile_data = {
+        ["parent-plugin"] = { branch = "main", commit = "abc123" },
+        ["nested-plugin"] = { branch = "main", commit = "def456", source = "parent-plugin" },
+      }
+
+      local lockfile_path = temp_config .. "/lazy-lock.json"
+      vim.fn.writefile({ vim.json.encode(original_lockfile_data) }, lockfile_path)
+      vim.fn.system({ "git", "-C", temp_config, "add", "lazy-lock.json" })
+      vim.fn.system({ "git", "-C", temp_config, "commit", "-m", "add lockfile" })
+
+      vim.fn.mkdir(temp_config .. "/plugins", "p")
+      vim.fn.writefile({
+        "return {",
+        '  { "parent-plugin", enabled = false },',
+        "}",
+      }, temp_config .. "/plugins/core.lua")
+
+      local original_stdpath = vim.fn.stdpath
+      vim.fn.stdpath = function(what)
+        if what == "config" then
+          return temp_config
+        elseif what == "data" then
+          return test_cache_dir
+        end
+        return original_stdpath(what)
+      end
+
+      cache.clear_all()
+      lockfile.clear_cache()
+
+      local Config = require("super_lazy.config")
+      Config.setup({ lockfile_repo_dirs = { temp_config } })
+
+      local LazyConfig = require("lazy.core.config")
+      local Source = require("super_lazy.source")
+
+      local original_plugins = LazyConfig.plugins
+      local original_spec = LazyConfig.spec
+      local original_get_plugin_source = Source.get_plugin_source
+
+      LazyConfig.plugins = {}
+      LazyConfig.spec = {
+        disabled = {
+          {
+            name = "parent-plugin",
+            _ = {},
+          },
+        },
+        plugins = {},
+      }
+
+      Source.get_plugin_source = function(plugin_name, with_recipe)
+        if plugin_name == "parent-plugin" or plugin_name == "nested-plugin" then
+          if with_recipe then
+            return temp_config, plugin_name == "nested-plugin" and "parent-plugin" or nil
+          end
+          return temp_config
+        end
+        error("Plugin not found")
+      end
+
+      local ok = pcall(super_lazy.write_lockfiles)
+      assert.is_true(ok)
+
+      local result_lockfile = lockfile.read(temp_config .. "/lazy-lock.json")
+
+      assert.is_not_nil(result_lockfile["parent-plugin"])
+      assert.equals("main", result_lockfile["parent-plugin"].branch)
+      assert.equals("abc123", result_lockfile["parent-plugin"].commit)
+
+      assert.is_not_nil(result_lockfile["nested-plugin"])
+      assert.equals("main", result_lockfile["nested-plugin"].branch)
+      assert.equals("def456", result_lockfile["nested-plugin"].commit)
+      assert.equals("parent-plugin", result_lockfile["nested-plugin"].source)
+
+      vim.fn.stdpath = original_stdpath
+      LazyConfig.plugins = original_plugins
+      LazyConfig.spec = original_spec
+      Source.get_plugin_source = original_get_plugin_source
+      cache.clear_all()
+      lockfile.clear_cache()
+      vim.fn.delete(temp_config, "rf")
+      vim.fn.delete(test_cache_dir, "rf")
+    end)
+  end)
+
   describe("disabled recipe plugins", function()
     it("should preserve nested plugins when parent recipe plugin is disabled", function()
       -- Create temporary test directory

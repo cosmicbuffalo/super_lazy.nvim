@@ -25,9 +25,13 @@ local function needs_lockfile_sync()
 
   -- Check if main lockfile has uncommitted changes
   -- This will catch lazy making updates to the main lockfile even if split lockfiles don't exist
-  local git_diff = vim.fn.system({ "git", "diff", "--quiet", "HEAD", main_lockfile })
-  if vim.v.shell_error ~= 0 then
-    return true
+  local lockfile_dir = vim.fn.fnamemodify(main_lockfile, ":h")
+  local git_check = vim.fn.system({ "git", "-C", lockfile_dir, "rev-parse", "--git-dir" })
+  if vim.v.shell_error == 0 then
+    local git_diff = vim.fn.system({ "git", "-C", lockfile_dir, "diff", "--quiet", "HEAD", main_lockfile })
+    if vim.v.shell_error ~= 0 then
+      return true
+    end
   end
 
   local main_mtime = main_stat.mtime.sec
@@ -161,7 +165,6 @@ function M.write_lockfiles()
   Cache.set_all_plugin_sources(plugin_source_map)
 
   -- Preserve nested plugins whose parent is still in the lockfile
-  -- This handles the case where a recipe plugin (parent) is disabled
   for source_repo, plugins in pairs(plugins_by_source) do
     local lockfile_path = source_repo .. "/lazy-lock.json"
     local existing_repo_lockfile = Lockfile.read(lockfile_path)
@@ -169,6 +172,23 @@ function M.write_lockfiles()
     for plugin_name, plugin_entry in pairs(existing_repo_lockfile) do
       if not plugins[plugin_name] and plugin_entry.source and plugins[plugin_entry.source] then
         plugins[plugin_name] = plugin_entry
+      end
+    end
+  end
+
+  -- Restore entries from original lockfile (git HEAD) for plugins from disabled parents' lazy.lua files
+  local original_lockfile = Lockfile.get_cached()
+  if original_lockfile then
+    for plugin_name, lock_entry in pairs(original_lockfile) do
+      if lock_entry.source then
+        local parent_plugin = lock_entry.source
+
+        for source_repo, plugins in pairs(plugins_by_source) do
+          if plugins[parent_plugin] and not plugins[plugin_name] then
+            plugins[plugin_name] = lock_entry
+            break
+          end
+        end
       end
     end
   end

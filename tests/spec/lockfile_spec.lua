@@ -129,4 +129,238 @@ describe("lockfile module", function()
       assert.same(data, result)
     end)
   end)
+
+  describe("get_cached", function()
+    local test_cache_dir
+    local original_stdpath
+
+    before_each(function()
+      test_cache_dir = vim.fn.tempname()
+      vim.fn.mkdir(test_cache_dir, "p")
+
+      original_stdpath = vim.fn.stdpath
+      vim.fn.stdpath = function(what)
+        if what == "data" then
+          return test_cache_dir
+        end
+        return original_stdpath(what)
+      end
+
+      lockfile.clear_cache()
+    end)
+
+    after_each(function()
+      vim.fn.stdpath = original_stdpath
+      vim.fn.delete(test_cache_dir, "rf")
+    end)
+
+    it("should return nil when not in a git repo", function()
+      local temp_config = vim.fn.tempname()
+      vim.fn.mkdir(temp_config, "p")
+
+      vim.fn.stdpath = function(what)
+        if what == "config" then
+          return temp_config
+        elseif what == "data" then
+          return test_cache_dir
+        end
+        return original_stdpath(what)
+      end
+
+      local result = lockfile.get_cached()
+
+      vim.fn.delete(temp_config, "rf")
+
+      assert.is_nil(result)
+    end)
+
+    it("should return nil when lockfile doesn't exist in git", function()
+      local temp_config = vim.fn.tempname()
+      vim.fn.mkdir(temp_config, "p")
+
+      vim.fn.system({ "git", "-C", temp_config, "init" })
+      vim.fn.system({ "git", "-C", temp_config, "config", "user.email", "test@test.com" })
+      vim.fn.system({ "git", "-C", temp_config, "config", "user.name", "Test User" })
+
+      local readme = temp_config .. "/README.md"
+      vim.fn.writefile({ "# Test" }, readme)
+      vim.fn.system({ "git", "-C", temp_config, "add", "README.md" })
+      vim.fn.system({ "git", "-C", temp_config, "commit", "-m", "initial" })
+
+      vim.fn.stdpath = function(what)
+        if what == "config" then
+          return temp_config
+        elseif what == "data" then
+          return test_cache_dir
+        end
+        return original_stdpath(what)
+      end
+
+      local result = lockfile.get_cached()
+
+      vim.fn.delete(temp_config, "rf")
+
+      assert.is_nil(result)
+    end)
+
+    it("should return cached data when commit matches", function()
+      local temp_config = vim.fn.tempname()
+      vim.fn.mkdir(temp_config, "p")
+
+      vim.fn.system({ "git", "-C", temp_config, "init" })
+      vim.fn.system({ "git", "-C", temp_config, "config", "user.email", "test@test.com" })
+      vim.fn.system({ "git", "-C", temp_config, "config", "user.name", "Test User" })
+
+      local lockfile_data = {
+        ["plugin-cached"] = { branch = "main", commit = "cached123" },
+      }
+
+      local lockfile_path = temp_config .. "/lazy-lock.json"
+      vim.fn.writefile({ vim.json.encode(lockfile_data) }, lockfile_path)
+      vim.fn.system({ "git", "-C", temp_config, "add", "lazy-lock.json" })
+      vim.fn.system({ "git", "-C", temp_config, "commit", "-m", "add lockfile" })
+
+      vim.fn.stdpath = function(what)
+        if what == "config" then
+          return temp_config
+        elseif what == "data" then
+          return test_cache_dir
+        end
+        return original_stdpath(what)
+      end
+
+      local first_result = lockfile.get_cached()
+      assert.is_not_nil(first_result)
+      assert.same(lockfile_data, first_result)
+
+      local second_result = lockfile.get_cached()
+      assert.is_not_nil(second_result)
+      assert.same(lockfile_data, second_result)
+
+      vim.fn.delete(temp_config, "rf")
+    end)
+
+    it("should fetch from git and cache when no cache exists", function()
+      local temp_config = vim.fn.tempname()
+      vim.fn.mkdir(temp_config, "p")
+
+      vim.fn.system({ "git", "-C", temp_config, "init" })
+      vim.fn.system({ "git", "-C", temp_config, "config", "user.email", "test@test.com" })
+      vim.fn.system({ "git", "-C", temp_config, "config", "user.name", "Test User" })
+
+      local lockfile_data = {
+        ["plugin-from-git"] = { branch = "main", commit = "git123" },
+      }
+
+      local lockfile_path = temp_config .. "/lazy-lock.json"
+      vim.fn.writefile({ vim.json.encode(lockfile_data) }, lockfile_path)
+      vim.fn.system({ "git", "-C", temp_config, "add", "lazy-lock.json" })
+      vim.fn.system({ "git", "-C", temp_config, "commit", "-m", "add lockfile" })
+
+      vim.fn.stdpath = function(what)
+        if what == "config" then
+          return temp_config
+        elseif what == "data" then
+          return test_cache_dir
+        end
+        return original_stdpath(what)
+      end
+
+      local result = lockfile.get_cached()
+
+      assert.is_not_nil(result)
+      assert.same(lockfile_data, result)
+
+      local cache_file = test_cache_dir .. "/super_lazy/original_lockfile.json"
+      assert.equals(1, vim.fn.filereadable(cache_file))
+
+      vim.fn.stdpath = original_stdpath
+      vim.fn.delete(temp_config, "rf")
+    end)
+
+    it("should invalidate cache when commit changes", function()
+      local temp_config = vim.fn.tempname()
+      vim.fn.mkdir(temp_config, "p")
+
+      vim.fn.system({ "git", "-C", temp_config, "init" })
+      vim.fn.system({ "git", "-C", temp_config, "config", "user.email", "test@test.com" })
+      vim.fn.system({ "git", "-C", temp_config, "config", "user.name", "Test User" })
+
+      local old_lockfile = {
+        ["plugin-old"] = { branch = "main", commit = "old123" },
+      }
+
+      local lockfile_path = temp_config .. "/lazy-lock.json"
+      vim.fn.writefile({ vim.json.encode(old_lockfile) }, lockfile_path)
+      vim.fn.system({ "git", "-C", temp_config, "add", "lazy-lock.json" })
+      vim.fn.system({ "git", "-C", temp_config, "commit", "-m", "add old lockfile" })
+
+      vim.fn.stdpath = function(what)
+        if what == "config" then
+          return temp_config
+        elseif what == "data" then
+          return test_cache_dir
+        end
+        return original_stdpath(what)
+      end
+
+      local first_result = lockfile.get_cached()
+      assert.same(old_lockfile, first_result)
+
+      local new_lockfile = {
+        ["plugin-new"] = { branch = "main", commit = "new456" },
+      }
+
+      vim.fn.writefile({ vim.json.encode(new_lockfile) }, lockfile_path)
+      vim.fn.system({ "git", "-C", temp_config, "add", "lazy-lock.json" })
+      vim.fn.system({ "git", "-C", temp_config, "commit", "-m", "update lockfile" })
+
+      local second_result = lockfile.get_cached()
+      assert.same(new_lockfile, second_result)
+
+      vim.fn.stdpath = original_stdpath
+      vim.fn.delete(temp_config, "rf")
+    end)
+  end)
+
+
+  describe("clear_cache", function()
+    local test_cache_dir
+    local original_stdpath
+
+    before_each(function()
+      test_cache_dir = vim.fn.tempname()
+      vim.fn.mkdir(test_cache_dir, "p")
+
+      original_stdpath = vim.fn.stdpath
+      vim.fn.stdpath = function(what)
+        if what == "data" then
+          return test_cache_dir
+        end
+        return original_stdpath(what)
+      end
+    end)
+
+    after_each(function()
+      vim.fn.stdpath = original_stdpath
+      vim.fn.delete(test_cache_dir, "rf")
+    end)
+
+    it("should remove cache file", function()
+      local cache_file = test_cache_dir .. "/super_lazy/original_lockfile.json"
+      vim.fn.mkdir(vim.fn.fnamemodify(cache_file, ":h"), "p")
+
+      local test_data = {
+        timestamp = os.time(),
+        commit = "abc123def",
+        lockfile = { ["plugin"] = { branch = "main", commit = "abc" } },
+      }
+
+      vim.fn.writefile({ vim.json.encode(test_data) }, cache_file)
+      assert.equals(1, vim.fn.filereadable(cache_file))
+
+      lockfile.clear_cache()
+      assert.equals(0, vim.fn.filereadable(cache_file))
+    end)
+  end)
 end)
