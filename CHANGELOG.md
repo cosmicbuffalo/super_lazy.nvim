@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] - 2025-11-05
+
+### Added
+- **Git-based Lockfile Preservation**: New lockfile caching system that preserves plugin entries pre-Lazy operations from git HEAD
+  - Reads original lockfile from `git show HEAD:lazy-lock.json` to restore entries for disabled plugins
+  - Commit-based cache invalidation ensures cache stays in sync
+  - Cache stored at `~/.local/share/nvim/super_lazy/original_lockfile.json`
+- New lockfile API methods: `get_cached()` and `clear_cache()` for accessing git-based lockfile data
+
+### Fixed
+- Disabled plugins with nested recipe plugins now correctly preserve all entries even when parent is not installed
+- Cache directory paths now use dynamic functions instead of constants for better test mocking support
+
 ## [0.2.2] - 2025-11-03
 
 ### Fixed
