@@ -323,7 +323,6 @@ describe("lockfile module", function()
     end)
   end)
 
-
   describe("clear_cache", function()
     local test_cache_dir
     local original_stdpath
