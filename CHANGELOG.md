@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4] - 2025-11-17
+
+### Fixed
+- Disabled plugins that exist in config but are not installed now correctly restore their lockfile entries from git HEAD
+  - Previously, disabled plugins would only restore if they existed in the current main lockfile
+  - Now also checks the original lockfile from git HEAD as a fallback, ensuring disabled plugins remain in lockfiles when running `lazy restore`
+
 ## [0.2.3] - 2025-11-05
 
 ### Added
