@@ -102,6 +102,7 @@ end
 function M.write_lockfiles()
   local main_lockfile = LazyConfig.options.lockfile
   local existing_lockfile = Lockfile.read(main_lockfile)
+  local original_lockfile = Lockfile.get_cached()
 
   local plugins_by_source = {}
 
@@ -149,8 +150,11 @@ function M.write_lockfiles()
         end
       end
     else
-      -- For disabled plugins, use existing lockfile entry if available
+      -- For disabled/uninstalled plugins, try to restore from existing lockfile or git HEAD
       lockfile_entry = existing_lockfile[plugin.name]
+      if not lockfile_entry and original_lockfile then
+        lockfile_entry = original_lockfile[plugin.name]
+      end
     end
 
     if lockfile_entry then
