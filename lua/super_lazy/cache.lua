@@ -10,8 +10,16 @@ local plugin_source_cache = nil -- will be loaded from disk
 
 local function ensure_cache_dir()
   if vim.fn.isdirectory(cache_dir) == 0 then
-    vim.fn.mkdir(cache_dir, "p")
+    local ok, err = pcall(vim.fn.mkdir, cache_dir, "p")
+    if not ok then
+      vim.notify(
+        string.format("super_lazy: Failed to create cache directory %s: %s", cache_dir, err),
+        vim.log.levels.WARN
+      )
+      return false
+    end
   end
+  return true
 end
 
 local function load_persistent_cache()
@@ -46,7 +54,9 @@ local function save_persistent_cache()
     return
   end
 
-  ensure_cache_dir()
+  if not ensure_cache_dir() then
+    return
+  end
 
   local ok, encoded = pcall(vim.json.encode, plugin_source_cache)
   if not ok then
