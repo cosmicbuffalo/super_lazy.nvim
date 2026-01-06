@@ -33,7 +33,7 @@ Features:
 2. REQUIREMENTS                                     *super_lazy-requirements*
 
   • Neovim >= 0.8.0
-  • lazy.nvim == 11.17.1
+  • lazy.nvim == 11.17.5
 
 ==============================================================================
 3. INSTALLATION                                     *super_lazy-installation*
@@ -157,7 +157,7 @@ The health check verifies:
 
 Version Compatibility ~
 
-super_lazy.nvim requires lazy.nvim version 11.17.1. Use `:checkhealth super_lazy`
+super_lazy.nvim requires lazy.nvim version 11.17.5. Use `:checkhealth super_lazy`
 to verify your lazy.nvim version and get specific guidance if there's a mismatch.
 
 Plugin Not Found Error ~

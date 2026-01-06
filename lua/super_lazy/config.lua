@@ -1,6 +1,6 @@
 local M = {}
 
-M.COMPATIBLE_LAZY_VERSION = "11.17.1"
+M.COMPATIBLE_LAZY_VERSION = "11.17.5"
 
 local default_config = {
   lockfile_repo_dirs = { vim.fn.stdpath("config") },

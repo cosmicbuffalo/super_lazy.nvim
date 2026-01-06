@@ -8,7 +8,7 @@ describe("config module", function()
 
   it("should have compatible lazy version defined", function()
     assert.is_not_nil(config.COMPATIBLE_LAZY_VERSION)
-    assert.equals("11.17.1", config.COMPATIBLE_LAZY_VERSION)
+    assert.equals("11.17.5", config.COMPATIBLE_LAZY_VERSION)
   end)
 
   it("should setup with default config", function()

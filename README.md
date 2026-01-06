@@ -7,7 +7,7 @@ A Neovim plugin that extends [lazy.nvim](https://github.com/folke/lazy.nvim) to 
 - **Multi Lockfile Management**: Automatically maintain separate `lazy-lock.json` files for different plugin sources (e.g., shared team config vs. personal config)
 - **Source Detection**: Intelligent detection of which repository each plugin belongs to
 - **UI Integration**: Enhanced lazy.nvim UI showing the source repository for each plugin
-- **Recipe Support**: Handles plugins defined within other plugins' `lazy.lua` files
+- **Recipe/Package Support**: Handles plugins defined within other plugins' `lazy.lua` files
 - **Health Check**: Built-in `:checkhealth super_lazy` for validating setup and version compatibility
 - **Smart Caching**: Optimized performance through intelligent caching mechanisms
 
@@ -21,7 +21,7 @@ A Neovim plugin that extends [lazy.nvim](https://github.com/folke/lazy.nvim) to 
 ## Requirements
 
 - Neovim >= 0.8.0
-- [lazy.nvim](https://github.com/folke/lazy.nvim) == 11.17.1
+- [lazy.nvim](https://github.com/folke/lazy.nvim) >= 11.17.5
 
 ## Installation
 
@@ -97,7 +97,7 @@ into the lockfile at the root of the main config directory
 For each plugin, super_lazy.nvim:
 1. Searches for plugin specifications in the configured `lockfile_repo_dirs`
 2. Checks plugin files matching the pattern `**/plugins/**/*.lua`
-3. For plugins defined in recipes (other plugins' `lazy.lua` files), tracks the parent plugin
+3. For plugins defined in recipes/packages (other plugins' `lazy.lua` files), tracks the parent plugin
 4. Assigns the plugin to the first matching repository
 
 ### Known Limitations
@@ -131,7 +131,7 @@ This will check:
 
 ### Version Compatibility
 
-super_lazy.nvim requires lazy.nvim version 11.17.1. Use `:checkhealth super_lazy` to verify your lazy.nvim version and get specific guidance if there's a mismatch.
+super_lazy.nvim requires lazy.nvim version 11.17.5. Use `:checkhealth super_lazy` to verify your lazy.nvim version and get specific guidance if there's a mismatch.
 
 ### Plugin Not Found Error
 
@@ -143,7 +143,7 @@ Plugin 'plugin-name' not found in any configured lockfile repository
 Ensure:
 1. The plugin is defined in one of your `lockfile_repo_dirs`
 2. The plugin file is in a `plugins/` directory
-3. The plugin specification follows the correct format
+3. The plugin specification follows the correct format laid out by `lazy.nvim`'s [Plugin Spec](https://lazy.folke.io/spec)
 
 ### Clear Caches
 

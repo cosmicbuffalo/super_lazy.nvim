@@ -10,7 +10,7 @@ local error = vim.health.error or vim.health.report_error
 local info = vim.health.info or vim.health.report_info
 
 function M.check()
-  start("super_lazy.nvim")
+  start("Compatibility")
 
   -- Check Neovim version
   local nvim_version = vim.version()
@@ -32,13 +32,13 @@ function M.check()
   -- Check if lazy.nvim is installed
   local lazy_ok = pcall(require, "lazy")
   if not lazy_ok then
-    error("{lazy.nvim} is not installed", {
+    error("{lazy.nvim}  is not installed", {
       "super_lazy.nvim requires lazy.nvim to be installed",
       "See: https://github.com/folke/lazy.nvim",
     })
     return
   else
-    ok("{lazy.nvim} is installed")
+    ok("{lazy.nvim}  is installed")
   end
 
   -- Check lazy.nvim version
@@ -61,26 +61,59 @@ function M.check()
           ),
           {
             "Some features may not work correctly",
-            "Consider updating to lazy.nvim " .. Config.COMPATIBLE_LAZY_VERSION,
+            "Consider pinning to lazy.nvim " .. Config.COMPATIBLE_LAZY_VERSION .. " if you run into lockfile issues",
           }
         )
       end
     else
-      -- Try to check for required APIs even if version is unknown
-      local LazyConfig = require("lazy.core.config")
-      local LazyLock = require("lazy.manage.lock")
-
-      if LazyConfig.plugins and LazyConfig.spec and LazyLock.update then
-        warn("Could not determine lazy.nvim version, but required APIs are present", {
+      warn(
+        ("Could not determine lazy.nvim version"),
+        {
           "Expected version: `" .. Config.COMPATIBLE_LAZY_VERSION .. "`",
-          "Some features may not work correctly if version differs",
-        })
-      else
-        error("Incompatible lazy.nvim version - missing required APIs", {
-          "Please install lazy.nvim " .. Config.COMPATIBLE_LAZY_VERSION,
-        })
-      end
+          "If hooks checks below are OK then this may be safe to ignore"
+        }
+      )
     end
+  end
+
+  start("Hooks")
+  local LazyConfig = require("lazy.core.config")
+  if LazyConfig.plugins then
+    ok("{lazy.core.config.plugins}  is available")
+  else
+    error("{lazy.core.config.plugins}  is not available", {
+      "This is required for super_lazy.nvim to work",
+      "Please ensure lazy.nvim is properly installed",
+    })
+  end
+
+  if LazyConfig.spec then
+    ok("{lazy.core.config.spec}  is available")
+  else
+    error("{lazy.core.config.spec}  is not available", {
+      "This is required for super_lazy.nvim to work",
+      "Please ensure lazy.nvim is properly installed",
+    })
+  end
+
+  local LazyLock = require("lazy.manage.lock")
+  if LazyLock.update then
+    ok("{lazy.manage.lock.update}  is available")
+  else
+    error("{lazy.manage.lock.update}  is not available", {
+      "This is required for super_lazy.nvim to work",
+      "Please ensure lazy.nvim is properly installed",
+    })
+  end
+
+  local LazyRender = require("lazy.view.render")
+  if LazyRender.details then
+    ok("{lazy.view.render.details}  is available")
+  else
+    error("{lazy.view.render.details}  is not available", {
+      "This is required for super_lazy.nvim to work",
+      "Please ensure lazy.nvim is properly installed",
+    })
   end
 
   -- Check configuration
@@ -149,47 +182,6 @@ function M.check()
         })
       end
     end
-  end
-
-  -- Check if hooks are set up
-  start("Hooks")
-  local LazyConfig = require("lazy.core.config")
-  if LazyConfig.plugins then
-    ok("{lazy.core.config.plugins} is available")
-  else
-    error("{lazy.core.config.plugins} is not available", {
-      "This is required for super_lazy.nvim to work",
-      "Please ensure lazy.nvim is properly installed",
-    })
-  end
-
-  if LazyConfig.spec then
-    ok("{lazy.core.config.spec} is available")
-  else
-    error("{lazy.core.config.spec} is not available", {
-      "This is required for super_lazy.nvim to work",
-      "Please ensure lazy.nvim is properly installed",
-    })
-  end
-
-  local LazyLock = require("lazy.manage.lock")
-  if LazyLock.update then
-    ok("{lazy.manage.lock.update} is available")
-  else
-    error("{lazy.manage.lock.update} is not available", {
-      "This is required for super_lazy.nvim to work",
-      "Please ensure lazy.nvim is properly installed",
-    })
-  end
-
-  local LazyRender = require("lazy.view.render")
-  if LazyRender.details then
-    ok("{lazy.view.render.details} is available")
-  else
-    error("{lazy.view.render.details} is not available", {
-      "This is required for super_lazy.nvim to work",
-      "Please ensure lazy.nvim is properly installed",
-    })
   end
 end
 
