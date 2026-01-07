@@ -66,13 +66,10 @@ function M.check()
         )
       end
     else
-      warn(
-        ("Could not determine lazy.nvim version"),
-        {
-          "Expected version: `" .. Config.COMPATIBLE_LAZY_VERSION .. "`",
-          "If hooks checks below are OK then this may be safe to ignore"
-        }
-      )
+      warn("Could not determine lazy.nvim version", {
+        "Expected version: `" .. Config.COMPATIBLE_LAZY_VERSION .. "`",
+        "If hooks checks below are OK then this may be safe to ignore",
+      })
     end
   end
 
