@@ -90,6 +90,17 @@ function M.is_busy()
   return current_operation ~= nil
 end
 
+-- Process items asynchronously with a synchronous process_fn
+-- opts = {
+--   items = { ... },                       -- List of items to process
+--   process_fn = function(item) end,       -- Function to process each item (sync)
+--   on_complete = function(results) end,   -- Called when all done (optional)
+--   on_cancel = function() end,            -- Called if cancelled (optional)
+--   title = "...",                         -- Progress title
+--   completion_message = "...",            -- Message to show on completion (optional)
+--   get_item_name = function(item) end,    -- Get display name for item (optional)
+--   silent = bool,                         -- Suppress progress notifications (optional)
+-- }
 function M.process_async(opts)
   M.cancel_current()
 
@@ -147,6 +158,17 @@ function M.process_async(opts)
   vim.schedule(process_next)
 end
 
+-- Process items with an async process_fn that takes a callback
+-- opts = {
+--   items = { ... },                              -- List of items to process
+--   process_fn = function(item, callback) end,   -- Async function, calls callback(result) when done
+--   on_complete = function(results) end,         -- Called when all done (optional)
+--   on_cancel = function() end,                  -- Called if cancelled (optional)
+--   title = "...",                               -- Progress title
+--   completion_message = "...",                  -- Message to show on completion (optional)
+--   get_item_name = function(item) end,          -- Get display name for item (optional)
+--   silent = bool,                               -- Suppress progress notifications (optional)
+-- }
 function M.process_async_with_callback(opts)
   M.cancel_current()
 
