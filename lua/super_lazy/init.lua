@@ -76,6 +76,32 @@ function M.setup(user_config)
       ensure_lockfiles_updated()
     end
   end)
+
+  vim.api.nvim_create_user_command("SuperLazyRefresh", function(opts)
+    local plugin_names = {}
+    if opts.args ~= "" then
+      for name in opts.args:gmatch("%S+") do
+        table.insert(plugin_names, name)
+      end
+    end
+    M.refresh(plugin_names)
+  end, {
+    nargs = "*",
+    force = true,
+    complete = function()
+      local ok, lazy = pcall(require, "lazy")
+      if not ok then
+        return {}
+      end
+      local plugins = lazy.plugins()
+      local names = {}
+      for _, plugin in ipairs(plugins) do
+        table.insert(names, plugin.name)
+      end
+      table.sort(names)
+      return names
+    end,
+  })
 end
 
 local function get_cached_git_info(plugin_dir, plugin_name)
@@ -235,6 +261,57 @@ local function restore_cleaned_plugins(pre_clean_lockfiles)
     end
 
     Lockfile.write(lockfile_path, current_lockfile)
+  end
+end
+
+function M.refresh(plugin_names)
+  if #plugin_names == 0 then
+    -- Full cache refresh
+    Util.notify("Refreshing super_lazy cache...")
+
+    Cache.clear_all()
+
+    local ok, err = pcall(M.write_lockfiles)
+    if not ok then
+      Util.notify("Error refreshing: " .. tostring(err), vim.log.levels.ERROR)
+      return
+    end
+
+    Util.notify("Refreshed super_lazy source cache and regenerated lockfiles")
+  else
+    -- Multi-plugin refresh
+    local count = #plugin_names
+    Util.notify("Refreshing " .. count .. " plugin" .. (count > 1 and "s" or "") .. "...")
+
+    -- Collect old sources before clearing
+    local old_sources = {}
+    for _, name in ipairs(plugin_names) do
+      old_sources[name] = Cache.clear_plugin_source(name)
+    end
+
+    -- Rewrite lockfiles (triggers re-detection)
+    local ok, err = pcall(M.write_lockfiles)
+    if not ok then
+      Util.notify("Error refreshing: " .. tostring(err), vim.log.levels.ERROR)
+      return
+    end
+
+    -- Report results for each plugin
+    for _, name in ipairs(plugin_names) do
+      local old_repo = old_sources[name] and old_sources[name].repo or nil
+      local new_source = Cache.get_plugin_source(name)
+      local new_repo = new_source and new_source.repo or nil
+
+      if not new_repo then
+        Util.notify("Plugin '" .. name .. "' not found in any configured repository", vim.log.levels.WARN)
+      elseif not old_repo then
+        Util.notify("Detected " .. name .. " source: " .. Util.format_path(new_repo))
+      elseif old_repo ~= new_repo then
+        Util.notify("Moved " .. name .. " from " .. Util.format_path(old_repo) .. " to " .. Util.format_path(new_repo))
+      else
+        Util.notify(name .. " source unchanged (" .. Util.format_path(new_repo) .. ")")
+      end
+    end
   end
 end
 

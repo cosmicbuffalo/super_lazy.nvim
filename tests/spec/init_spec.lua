@@ -15,6 +15,10 @@ describe("super_lazy init module", function()
     it("should export setup_lazy_hooks", function()
       assert.is_function(super_lazy.setup_lazy_hooks)
     end)
+
+    it("should export refresh function", function()
+      assert.is_function(super_lazy.refresh)
+    end)
   end)
 
   describe("setup_lazy_hooks", function()
@@ -969,6 +973,434 @@ describe("super_lazy init module", function()
 
       -- Cleanup
       LazyLock.update = original_update
+      cache.clear_all()
+      vim.fn.delete(test_dir, "rf")
+    end)
+  end)
+
+  describe("refresh", function()
+    it("should clear entire cache and regenerate lockfiles when called with empty list", function()
+      -- Create temporary test directory
+      local test_dir = "/tmp/super_lazy_refresh_test_" .. os.time()
+      local repo1 = test_dir .. "/repo1"
+
+      vim.fn.mkdir(repo1 .. "/plugins", "p")
+
+      vim.fn.writefile({
+        "return {",
+        '  { "nvim-lua/plenary.nvim" },',
+        "}",
+      }, repo1 .. "/plugins/core.lua")
+
+      -- Setup super_lazy
+      cache.clear_all()
+      super_lazy.setup({
+        lockfile_repo_dirs = { repo1 },
+      })
+
+      -- Mock lazy.nvim structures
+      local LazyConfig = require("lazy.core.config")
+      local LazyGit = require("lazy.manage.git")
+
+      local original_plugins = LazyConfig.plugins
+      local original_spec = LazyConfig.spec
+      local original_git_info = LazyGit.info
+
+      LazyConfig.plugins = {
+        {
+          name = "plenary.nvim",
+          dir = "/tmp/lazy/plenary.nvim",
+          _ = { installed = true },
+        },
+      }
+
+      LazyConfig.spec = {
+        disabled = {},
+        plugins = {},
+      }
+
+      LazyGit.info = function(dir)
+        if dir:match("plenary") then
+          return { branch = "master", commit = "abc123" }
+        end
+        return nil
+      end
+
+      -- Set a cache entry before refresh
+      cache.set_plugin_source("plenary.nvim", repo1, nil)
+
+      -- Capture notifications
+      local notifications = {}
+      local original_notify = vim.notify
+      vim.notify = function(msg, level, opts)
+        table.insert(notifications, { msg = msg, level = level })
+      end
+
+      -- Call refresh with empty list
+      super_lazy.refresh({})
+
+      -- Restore
+      vim.notify = original_notify
+      LazyConfig.plugins = original_plugins
+      LazyConfig.spec = original_spec
+      LazyGit.info = original_git_info
+
+      -- Verify notifications
+      assert.is_true(#notifications >= 2)
+      assert.is_truthy(notifications[1].msg:match("Refreshing super_lazy cache"))
+      assert.is_truthy(notifications[2].msg:match("Refreshed super_lazy source cache"))
+
+      -- Verify lockfile was written
+      assert.equals(1, vim.fn.filereadable(repo1 .. "/lazy-lock.json"))
+
+      -- Cleanup
+      cache.clear_all()
+      vim.fn.delete(test_dir, "rf")
+    end)
+
+    it("should refresh a single plugin and report unchanged source", function()
+      -- Create temporary test directory
+      local test_dir = "/tmp/super_lazy_refresh_single_test_" .. os.time()
+      local repo1 = test_dir .. "/repo1"
+
+      vim.fn.mkdir(repo1 .. "/plugins", "p")
+
+      vim.fn.writefile({
+        "return {",
+        '  { "nvim-lua/plenary.nvim" },',
+        "}",
+      }, repo1 .. "/plugins/core.lua")
+
+      -- Setup super_lazy
+      cache.clear_all()
+      super_lazy.setup({
+        lockfile_repo_dirs = { repo1 },
+      })
+
+      -- Mock lazy.nvim structures
+      local LazyConfig = require("lazy.core.config")
+      local LazyGit = require("lazy.manage.git")
+
+      local original_plugins = LazyConfig.plugins
+      local original_spec = LazyConfig.spec
+      local original_git_info = LazyGit.info
+
+      LazyConfig.plugins = {
+        {
+          name = "plenary.nvim",
+          dir = "/tmp/lazy/plenary.nvim",
+          _ = { installed = true },
+        },
+      }
+
+      LazyConfig.spec = {
+        disabled = {},
+        plugins = {},
+      }
+
+      LazyGit.info = function(dir)
+        if dir:match("plenary") then
+          return { branch = "master", commit = "abc123" }
+        end
+        return nil
+      end
+
+      -- Set cache entry (same repo - should be unchanged after refresh)
+      cache.set_plugin_source("plenary.nvim", repo1, nil)
+
+      -- Capture notifications
+      local notifications = {}
+      local original_notify = vim.notify
+      vim.notify = function(msg, level, opts)
+        table.insert(notifications, { msg = msg, level = level })
+      end
+
+      -- Call refresh with single plugin
+      super_lazy.refresh({ "plenary.nvim" })
+
+      -- Restore
+      vim.notify = original_notify
+      LazyConfig.plugins = original_plugins
+      LazyConfig.spec = original_spec
+      LazyGit.info = original_git_info
+
+      -- Verify notifications
+      assert.is_true(#notifications >= 2)
+      assert.is_truthy(notifications[1].msg:match("Refreshing 1 plugin"))
+      assert.is_truthy(notifications[2].msg:match("plenary.nvim source unchanged"))
+
+      -- Cleanup
+      cache.clear_all()
+      vim.fn.delete(test_dir, "rf")
+    end)
+
+    it("should detect when plugin moves to different repo", function()
+      -- Create temporary test directories
+      local test_dir = "/tmp/super_lazy_refresh_move_test_" .. os.time()
+      local repo1 = test_dir .. "/repo1"
+      local repo2 = test_dir .. "/repo2"
+
+      vim.fn.mkdir(repo1 .. "/plugins", "p")
+      vim.fn.mkdir(repo2 .. "/plugins", "p")
+
+      -- Plugin is now in repo1 (moved from repo2)
+      vim.fn.writefile({
+        "return {",
+        '  { "nvim-lua/plenary.nvim" },',
+        "}",
+      }, repo1 .. "/plugins/core.lua")
+
+      -- Setup super_lazy
+      cache.clear_all()
+      super_lazy.setup({
+        lockfile_repo_dirs = { repo1, repo2 },
+      })
+
+      -- Mock lazy.nvim structures
+      local LazyConfig = require("lazy.core.config")
+      local LazyGit = require("lazy.manage.git")
+
+      local original_plugins = LazyConfig.plugins
+      local original_spec = LazyConfig.spec
+      local original_git_info = LazyGit.info
+
+      LazyConfig.plugins = {
+        {
+          name = "plenary.nvim",
+          dir = "/tmp/lazy/plenary.nvim",
+          _ = { installed = true },
+        },
+      }
+
+      LazyConfig.spec = {
+        disabled = {},
+        plugins = {},
+      }
+
+      LazyGit.info = function(dir)
+        if dir:match("plenary") then
+          return { branch = "master", commit = "abc123" }
+        end
+        return nil
+      end
+
+      -- Set cache entry to OLD repo (repo2)
+      cache.set_plugin_source("plenary.nvim", repo2, nil)
+
+      -- Capture notifications
+      local notifications = {}
+      local original_notify = vim.notify
+      vim.notify = function(msg, level, opts)
+        table.insert(notifications, { msg = msg, level = level })
+      end
+
+      -- Call refresh with single plugin
+      super_lazy.refresh({ "plenary.nvim" })
+
+      -- Restore
+      vim.notify = original_notify
+      LazyConfig.plugins = original_plugins
+      LazyConfig.spec = original_spec
+      LazyGit.info = original_git_info
+
+      -- Verify notifications - should show "Moved"
+      assert.is_true(#notifications >= 2)
+      assert.is_truthy(notifications[1].msg:match("Refreshing 1 plugin"))
+      assert.is_truthy(notifications[2].msg:match("Moved plenary.nvim from"))
+
+      -- Cleanup
+      cache.clear_all()
+      vim.fn.delete(test_dir, "rf")
+    end)
+
+    it("should refresh multiple plugins at once", function()
+      -- Create temporary test directory
+      local test_dir = "/tmp/super_lazy_refresh_multi_test_" .. os.time()
+      local repo1 = test_dir .. "/repo1"
+
+      vim.fn.mkdir(repo1 .. "/plugins", "p")
+
+      vim.fn.writefile({
+        "return {",
+        '  { "nvim-lua/plenary.nvim" },',
+        '  { "folke/tokyonight.nvim" },',
+        "}",
+      }, repo1 .. "/plugins/core.lua")
+
+      -- Setup super_lazy
+      cache.clear_all()
+      super_lazy.setup({
+        lockfile_repo_dirs = { repo1 },
+      })
+
+      -- Mock lazy.nvim structures
+      local LazyConfig = require("lazy.core.config")
+      local LazyGit = require("lazy.manage.git")
+
+      local original_plugins = LazyConfig.plugins
+      local original_spec = LazyConfig.spec
+      local original_git_info = LazyGit.info
+
+      LazyConfig.plugins = {
+        {
+          name = "plenary.nvim",
+          dir = "/tmp/lazy/plenary.nvim",
+          _ = { installed = true },
+        },
+        {
+          name = "tokyonight.nvim",
+          dir = "/tmp/lazy/tokyonight.nvim",
+          _ = { installed = true },
+        },
+      }
+
+      LazyConfig.spec = {
+        disabled = {},
+        plugins = {},
+      }
+
+      LazyGit.info = function(dir)
+        if dir:match("plenary") then
+          return { branch = "master", commit = "abc123" }
+        elseif dir:match("tokyonight") then
+          return { branch = "main", commit = "def456" }
+        end
+        return nil
+      end
+
+      -- Set cache entries
+      cache.set_plugin_source("plenary.nvim", repo1, nil)
+      cache.set_plugin_source("tokyonight.nvim", repo1, nil)
+
+      -- Capture notifications
+      local notifications = {}
+      local original_notify = vim.notify
+      vim.notify = function(msg, level, opts)
+        table.insert(notifications, { msg = msg, level = level })
+      end
+
+      -- Call refresh with multiple plugins
+      super_lazy.refresh({ "plenary.nvim", "tokyonight.nvim" })
+
+      -- Restore
+      vim.notify = original_notify
+      LazyConfig.plugins = original_plugins
+      LazyConfig.spec = original_spec
+      LazyGit.info = original_git_info
+
+      -- Verify notifications - should show "2 plugins" and results for each
+      assert.is_true(#notifications >= 3)
+      assert.is_truthy(notifications[1].msg:match("Refreshing 2 plugins"))
+
+      -- Cleanup
+      cache.clear_all()
+      vim.fn.delete(test_dir, "rf")
+    end)
+
+    it("should warn when plugin not found in any repo", function()
+      -- Create temporary test directory
+      local test_dir = "/tmp/super_lazy_refresh_notfound_test_" .. os.time()
+      local repo1 = test_dir .. "/repo1"
+
+      vim.fn.mkdir(repo1 .. "/plugins", "p")
+
+      vim.fn.writefile({
+        "return {",
+        "}",
+      }, repo1 .. "/plugins/core.lua")
+
+      -- Setup super_lazy
+      cache.clear_all()
+      super_lazy.setup({
+        lockfile_repo_dirs = { repo1 },
+      })
+
+      -- Mock lazy.nvim structures
+      local LazyConfig = require("lazy.core.config")
+
+      local original_plugins = LazyConfig.plugins
+      local original_spec = LazyConfig.spec
+
+      LazyConfig.plugins = {}
+      LazyConfig.spec = {
+        disabled = {},
+        plugins = {},
+      }
+
+      -- Capture notifications
+      local notifications = {}
+      local original_notify = vim.notify
+      vim.notify = function(msg, level, opts)
+        table.insert(notifications, { msg = msg, level = level })
+      end
+
+      -- Call refresh with nonexistent plugin
+      super_lazy.refresh({ "nonexistent-plugin.nvim" })
+
+      -- Restore
+      vim.notify = original_notify
+      LazyConfig.plugins = original_plugins
+      LazyConfig.spec = original_spec
+
+      -- Verify warning notification
+      local found_warning = false
+      for _, notif in ipairs(notifications) do
+        if notif.msg:match("not found in any configured repository") and notif.level == vim.log.levels.WARN then
+          found_warning = true
+          break
+        end
+      end
+      assert.is_true(found_warning)
+
+      -- Cleanup
+      cache.clear_all()
+      vim.fn.delete(test_dir, "rf")
+    end)
+  end)
+
+  describe("SuperLazyRefresh command", function()
+    it("should be registered after setup", function()
+      cache.clear_all()
+      super_lazy.setup({
+        lockfile_repo_dirs = { vim.fn.stdpath("config") },
+      })
+
+      -- Check command exists
+      local commands = vim.api.nvim_get_commands({})
+      assert.is_not_nil(commands.SuperLazyRefresh)
+    end)
+
+    it("should support tab completion with plugin names", function()
+      -- Create temporary test directory
+      local test_dir = "/tmp/super_lazy_cmd_test_" .. os.time()
+      local repo1 = test_dir .. "/repo1"
+
+      vim.fn.mkdir(repo1 .. "/plugins", "p")
+
+      cache.clear_all()
+      super_lazy.setup({
+        lockfile_repo_dirs = { repo1 },
+      })
+
+      -- Mock lazy module for completion
+      local original_lazy_require = package.loaded["lazy"]
+      package.loaded["lazy"] = {
+        plugins = function()
+          return {
+            { name = "plenary.nvim" },
+            { name = "telescope.nvim" },
+            { name = "tokyonight.nvim" },
+          }
+        end,
+      }
+
+      -- Get command info
+      local commands = vim.api.nvim_get_commands({})
+      assert.is_not_nil(commands.SuperLazyRefresh)
+      assert.equals("*", commands.SuperLazyRefresh.nargs)
+
+      -- Restore
+      package.loaded["lazy"] = original_lazy_require
       cache.clear_all()
       vim.fn.delete(test_dir, "rf")
     end)

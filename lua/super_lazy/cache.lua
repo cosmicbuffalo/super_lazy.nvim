@@ -124,4 +124,12 @@ function M.clear_all()
   pcall(vim.fn.delete, cache_file)
 end
 
+function M.clear_plugin_source(plugin_name)
+  local cache = load_persistent_cache()
+  local old_source = cache.plugin_sources[plugin_name]
+  cache.plugin_sources[plugin_name] = nil
+  save_persistent_cache()
+  return old_source
+end
+
 return M

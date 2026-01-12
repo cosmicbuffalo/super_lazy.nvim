@@ -157,4 +157,42 @@ describe("cache module", function()
       assert.is_nil(cache.get_plugin_source("test-plugin"))
     end)
   end)
+
+  describe("clear_plugin_source", function()
+    it("should remove a single plugin from cache", function()
+      cache.set_plugin_source("plugin1", "/repo1", nil)
+      cache.set_plugin_source("plugin2", "/repo2", nil)
+
+      cache.clear_plugin_source("plugin1")
+
+      assert.is_nil(cache.get_plugin_source("plugin1"))
+      assert.is_not_nil(cache.get_plugin_source("plugin2"))
+    end)
+
+    it("should return the old source when clearing", function()
+      cache.set_plugin_source("test-plugin", "/test/repo", "parent-plugin")
+
+      local old_source = cache.clear_plugin_source("test-plugin")
+
+      assert.is_not_nil(old_source)
+      assert.equals("/test/repo", old_source.repo)
+      assert.equals("parent-plugin", old_source.parent)
+    end)
+
+    it("should return nil when plugin was not in cache", function()
+      local old_source = cache.clear_plugin_source("nonexistent-plugin")
+      assert.is_nil(old_source)
+    end)
+
+    it("should persist the removal to disk", function()
+      cache.set_plugin_source("persist-test", "/repo", nil)
+      cache.clear_plugin_source("persist-test")
+
+      -- Force reload from disk by clearing in-memory cache
+      cache.clear_all()
+
+      -- Plugin should still be gone after reload
+      assert.is_nil(cache.get_plugin_source("persist-test"))
+    end)
+  end)
 end)
