@@ -1,10 +1,7 @@
--- Async filesystem utilities using vim.uv (libuv)
 local M = {}
 
 local uv = vim.uv or vim.loop
 
--- Read a file asynchronously
--- callback(err, content)
 function M.read_file(path, callback)
   uv.fs_open(path, "r", 438, function(err, fd)
     if err then
@@ -31,16 +28,12 @@ function M.read_file(path, callback)
   end)
 end
 
--- Check if a file exists asynchronously
--- callback(exists)
 function M.file_exists(path, callback)
   uv.fs_stat(path, function(err, stat)
     callback(not err and stat ~= nil)
   end)
 end
 
--- Read directory entries asynchronously
--- callback(err, entries) where entries is a list of {name, type}
 function M.readdir(path, callback)
   uv.fs_opendir(path, function(err, dir)
     if err then
@@ -74,14 +67,11 @@ function M.readdir(path, callback)
   end)
 end
 
--- Recursively find all files matching a pattern asynchronously
--- callback(err, files) where files is a list of full paths
 function M.glob_async(base_path, pattern, callback)
   local results = {}
   local pending = 0
   local has_error = false
 
-  -- Convert glob pattern to Lua pattern
   local function glob_to_pattern(glob)
     local pat = glob
     pat = pat:gsub("%.", "%%.")
@@ -107,7 +97,6 @@ function M.glob_async(base_path, pattern, callback)
         return
       end
       if err then
-        -- Directory doesn't exist or can't be read - not fatal
         check_done()
         return
       end
@@ -131,8 +120,6 @@ function M.glob_async(base_path, pattern, callback)
   scan_dir(base_path, "")
 end
 
--- Search a file for patterns asynchronously
--- callback(found, matching_line)
 function M.search_file(path, patterns, callback)
   M.read_file(path, function(err, content)
     if err or not content then
@@ -152,9 +139,6 @@ function M.search_file(path, patterns, callback)
   end)
 end
 
--- Search multiple files for patterns asynchronously
--- Stops at first match
--- callback(found, file_path, matching_line)
 function M.search_files(files, patterns, callback)
   if #files == 0 then
     callback(false, nil, nil)
@@ -174,7 +158,6 @@ function M.search_files(files, patterns, callback)
         callback(true, file, line)
       else
         index = index + 1
-        -- Use vim.schedule to avoid deep recursion
         vim.schedule(search_next)
       end
     end)
