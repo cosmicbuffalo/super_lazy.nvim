@@ -1,4 +1,3 @@
-local Async = require("super_lazy.async")
 local Cache = require("super_lazy.cache")
 local Config = require("super_lazy.config")
 local Lockfile = require("super_lazy.lockfile")
@@ -58,24 +57,7 @@ local function needs_lockfile_sync()
   return false
 end
 
-local function ensure_lockfiles_updated()
-  M.write_lockfiles_async()
-end
-
-function M.setup(user_config)
-  Config.setup(user_config)
-
-  M.setup_lazy_hooks()
-  M.setup_user_commands()
-
-  -- Check if lazy.nvim updated the main lockfile before our hooks were set up
-  -- (e.g., during bootstrap/initial install). Only sync if timestamps indicate it's needed.
-  if needs_lockfile_sync() then
-    ensure_lockfiles_updated()
-  end
-end
-
-function M.setup_user_commands()
+local function setup_user_commands()
   local function get_plugin_names_completion()
     local ok, lazy = pcall(require, "lazy")
     if not ok then
@@ -102,16 +84,9 @@ function M.setup_user_commands()
 
   vim.api.nvim_create_user_command("SuperLazyRefresh", function(opts)
     local plugin_names = parse_plugin_names(opts.args)
-    if opts.bang then
-      -- ! variant runs synchronously
-      M.refresh_sync(plugin_names)
-    else
-      -- defualt command runs async with progress
-      M.refresh(plugin_names)
-    end
+    M.refresh(plugin_names)
   end, {
     nargs = "*",
-    bang = true,
     force = true,
     complete = get_plugin_names_completion,
   })
@@ -166,6 +141,19 @@ function M.setup_user_commands()
     force = true,
     complete = get_plugin_names_completion,
   })
+end
+
+function M.setup(user_config)
+  Config.setup(user_config)
+
+  M.setup_lazy_hooks()
+  setup_user_commands()
+
+  -- Check if lazy.nvim updated the main lockfile before our hooks were set up
+  -- (e.g., during bootstrap/initial install). Only sync if timestamps indicate it's needed.
+  if needs_lockfile_sync() then
+    M.write_lockfiles()
+  end
 end
 
 local function get_cached_git_info(plugin_dir, plugin_name)
@@ -290,33 +278,12 @@ local function finalize_lockfiles(results, existing_lockfile, original_lockfile)
   end
 end
 
-function M.write_lockfiles()
-  local main_lockfile = LazyConfig.options.lockfile
-  local existing_lockfile = Lockfile.read(main_lockfile)
-  local original_lockfile = Lockfile.get_cached()
-
-  local all_plugins = collect_all_plugins()
-  local results = {}
-
-  for _, plugin in pairs(all_plugins) do
-    local source_repo, parent_plugin = Source.get_plugin_source(plugin.name, true)
-    results[plugin.name] = {
-      repo = source_repo,
-      parent = parent_plugin,
-      entry = build_lockfile_entry(plugin, parent_plugin, existing_lockfile, original_lockfile),
-    }
-  end
-
-  finalize_lockfiles(results, existing_lockfile, original_lockfile)
-end
-
--- Async version of write_lockfiles
 -- opts = {
 --   on_complete = function(),  -- Called when all done (optional)
 --   on_cancel = function(),    -- Called if cancelled (optional)
 --   silent = bool,             -- If true, suppress progress notifications (optional)
 -- }
-function M.write_lockfiles_async(opts)
+function M.write_lockfiles(opts)
   local on_complete, on_cancel, silent
   if type(opts) == "function" then
     on_complete = opts
@@ -342,21 +309,17 @@ function M.write_lockfiles_async(opts)
     local ok, fidget = pcall(require, "fidget")
     if ok and fidget.progress and fidget.progress.handle then
       progress = fidget.progress.handle.create({
-        title = "Syncing lockfiles",
-        message = "Scanning plugin files...",
+        title = "super_lazy",
+        message = "Scanning plugins...",
         lsp_client = { name = "super_lazy" },
-        percentage = 0,
       })
     else
       Util.notify("Syncing lockfiles...")
     end
   end
 
-  Source.build_index_async(function(index)
+  Source.build_index(function(index)
     local function do_post_index_work()
-      if progress then
-        progress:report({ message = "Processing plugins...", percentage = 50 })
-      end
 
       local results = {}
       for _, plugin in pairs(all_plugins) do
@@ -405,8 +368,9 @@ local function restore_cleaned_plugins(pre_clean_lockfiles)
       if not current_lockfile[plugin_name] then
         local should_keep = false
 
-        local ok, result = pcall(Source.get_plugin_source, plugin_name)
-        if ok and result == repo_path then
+        -- Use index-based lookup (index was built during write_lockfiles)
+        local source_repo = Source.lookup_plugin_in_index(plugin_name)
+        if source_repo == repo_path then
           should_keep = true
         end
 
@@ -444,45 +408,12 @@ local function notify_plugin_refresh_results(plugin_names, old_sources)
   end
 end
 
-function M.refresh_sync(plugin_names)
-  if #plugin_names == 0 then
-    Util.notify("Refreshing super_lazy cache...")
-
-    Cache.clear_all()
-    Source.clear_index()
-
-    local ok, err = pcall(M.write_lockfiles)
-    if not ok then
-      Util.notify("Error refreshing: " .. tostring(err), vim.log.levels.ERROR)
-      return
-    end
-
-    Util.notify("Refreshed super_lazy source cache and regenerated lockfiles")
-  else
-    local count = #plugin_names
-    Util.notify("Refreshing " .. count .. " plugin" .. (count > 1 and "s" or "") .. "...")
-
-    local old_sources = {}
-    for _, name in ipairs(plugin_names) do
-      old_sources[name] = Cache.clear_plugin_source(name)
-    end
-
-    local ok, err = pcall(M.write_lockfiles)
-    if not ok then
-      Util.notify("Error refreshing: " .. tostring(err), vim.log.levels.ERROR)
-      return
-    end
-
-    notify_plugin_refresh_results(plugin_names, old_sources)
-  end
-end
-
 function M.refresh(plugin_names)
   if #plugin_names == 0 then
     Cache.clear_all()
     Source.clear_index()
 
-    M.write_lockfiles_async({
+    M.write_lockfiles({
       silent = false,
       on_complete = function()
         Util.notify("Refreshed super_lazy source cache and regenerated lockfiles")
@@ -494,7 +425,7 @@ function M.refresh(plugin_names)
       old_sources[name] = Cache.clear_plugin_source(name)
     end
 
-    M.write_lockfiles_async({
+    M.write_lockfiles({
       silent = false,
       on_complete = function()
         notify_plugin_refresh_results(plugin_names, old_sources)
@@ -516,7 +447,7 @@ function M.setup_lazy_hooks()
         return
       end
 
-      M.write_lockfiles_async({
+      M.write_lockfiles({
         on_complete = function()
           -- After write completes, restore entries for plugins still in config (during clean)
           if next(pre_clean_lockfiles) ~= nil then
@@ -558,6 +489,7 @@ function M.setup_lazy_hooks()
           local ui_ok, ui_err = pcall(UI.setup_hooks)
           if not ui_ok then
             Util.notify("Error setting up UI hooks: " .. tostring(ui_err), vim.log.levels.WARN)
+            -- Continue silently - original lazy UI behavior is preserved
           end
         end
       end,

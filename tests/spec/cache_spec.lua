@@ -17,18 +17,6 @@ describe("cache module", function()
     end)
   end)
 
-  describe("lazy_plugins cache", function()
-    it("should return nil when not set", function()
-      assert.is_nil(cache.get_lazy_plugins())
-    end)
-
-    it("should store and retrieve lazy plugins", function()
-      local plugins = { { name = "plugin1" }, { name = "plugin2" } }
-      cache.set_lazy_plugins(plugins)
-      assert.same(plugins, cache.get_lazy_plugins())
-    end)
-  end)
-
   describe("git_info cache", function()
     it("should return nil for non-existent key", function()
       assert.is_nil(cache.get_git_info("/some/path"))
@@ -141,13 +129,11 @@ describe("cache module", function()
   describe("clear_all", function()
     it("should clear all in-memory caches", function()
       cache.set_lockfile_repo_paths({ "/path" })
-      cache.set_lazy_plugins({ { name = "test" } })
       cache.set_git_info("/path", { branch = "main" })
 
       cache.clear_all()
 
       assert.is_nil(cache.get_lockfile_repo_paths())
-      assert.is_nil(cache.get_lazy_plugins())
       assert.is_nil(cache.get_git_info("/path"))
     end)
 

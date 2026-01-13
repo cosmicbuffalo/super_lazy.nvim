@@ -110,7 +110,7 @@ describe("source module", function()
     end)
   end)
 
-  describe("get_plugin_source", function()
+  describe("lookup_plugin_in_index", function()
     it("should return first repo path for lazy.nvim", function()
       config.setup({ lockfile_repo_dirs = { "/path1", "/path2" } })
 
@@ -124,7 +124,7 @@ describe("source module", function()
         return 1
       end
 
-      local source_path = source.get_plugin_source("lazy.nvim")
+      local source_path = source.lookup_plugin_in_index("lazy.nvim")
 
       vim.fn.resolve = original_resolve
       vim.fn.isdirectory = original_isdirectory
@@ -132,12 +132,11 @@ describe("source module", function()
       assert.equals("/path1", source_path)
     end)
 
-    it("should error when plugin not found", function()
+    it("should return error when plugin not found in index", function()
       config.setup({ lockfile_repo_dirs = { "/test" } })
 
       local original_resolve = vim.fn.resolve
       local original_isdirectory = vim.fn.isdirectory
-      local original_glob = vim.fn.glob
 
       vim.fn.resolve = function(path)
         return path
@@ -145,30 +144,18 @@ describe("source module", function()
       vim.fn.isdirectory = function(path)
         return 1
       end
-      vim.fn.glob = function(pattern, nosuf, list)
-        return {}
-      end
 
-      local original_require = require
-      _G.require = function(name)
-        if name == "lazy" then
-          return {
-            plugins = function()
-              return {}
-            end,
-          }
-        end
-        return original_require(name)
-      end
+      -- Clear the index so plugin won't be found
+      source.clear_index()
 
-      assert.has_error(function()
-        source.get_plugin_source("nonexistent-plugin")
-      end)
+      local repo, parent, err = source.lookup_plugin_in_index("nonexistent-plugin")
 
       vim.fn.resolve = original_resolve
       vim.fn.isdirectory = original_isdirectory
-      vim.fn.glob = original_glob
-      _G.require = original_require
+
+      assert.is_nil(repo)
+      assert.is_not_nil(err)
+      assert.is_truthy(err:match("not found"))
     end)
   end)
 end)

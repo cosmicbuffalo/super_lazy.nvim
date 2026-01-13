@@ -71,8 +71,8 @@ function M.setup_hooks()
 
         -- Add our source information at the top
         local source_info = "unknown"
-        local source_ok, repo_path, parent = pcall(Source.get_plugin_source, plugin.name, true)
-        if source_ok then
+        local repo_path, parent, err = Source.lookup_plugin_in_index(plugin.name, true)
+        if not err then
           if parent then
             source_info = repo_path .. " (" .. parent .. ")"
           else

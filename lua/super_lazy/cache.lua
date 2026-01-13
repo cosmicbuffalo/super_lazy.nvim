@@ -1,7 +1,6 @@
 local M = {}
 
 local cached_lockfile_repo_paths = nil -- cache of resolved repo paths
-local cached_lazy_plugins = nil -- cache for lazy.plugins()
 local git_info_cache = {}
 
 local cache_dir = vim.fn.stdpath("cache") .. "/super_lazy"
@@ -74,14 +73,6 @@ function M.set_lockfile_repo_paths(paths)
   cached_lockfile_repo_paths = paths
 end
 
-function M.get_lazy_plugins()
-  return cached_lazy_plugins
-end
-
-function M.set_lazy_plugins(plugins)
-  cached_lazy_plugins = plugins
-end
-
 function M.get_git_info(key)
   return git_info_cache[key]
 end
@@ -118,7 +109,6 @@ end
 
 function M.clear_all()
   cached_lockfile_repo_paths = nil
-  cached_lazy_plugins = nil
   git_info_cache = {}
   plugin_source_cache = nil
   pcall(vim.fn.delete, cache_file)

@@ -1,7 +1,6 @@
 local super_lazy = require("super_lazy")
 local cache = require("super_lazy.cache")
 local lockfile = require("super_lazy.lockfile")
-local async = require("super_lazy.async")
 
 -- Helper to wait for async operations to complete
 local function wait_for(condition, timeout_ms)
@@ -19,7 +18,6 @@ describe("super_lazy init module", function()
 
   -- Reset state before each test to ensure isolation
   before_each(function()
-    async.reset()
     cache.clear_all()
     -- Reset LazyConfig to defaults
     LazyConfig.plugins = {}
@@ -29,7 +27,6 @@ describe("super_lazy init module", function()
 
   -- Clean up after each test
   after_each(function()
-    async.reset()
     cache.clear_all()
     -- Restore original LazyConfig state
     LazyConfig.plugins = original_plugins
@@ -141,7 +138,7 @@ describe("super_lazy init module", function()
       -- Setup hooks
       super_lazy.setup_lazy_hooks()
 
-      -- Trigger update (which should call write_lockfiles_async)
+      -- Trigger update (which should call write_lockfiles)
       local ok = pcall(LazyLock.update)
       assert.is_true(ok)
 
@@ -166,8 +163,7 @@ describe("super_lazy init module", function()
       assert.equals("def456", lockfile2["tokyonight.nvim"].commit)
 
       -- Cleanup
-      async.reset()
-      LazyLock.update = original_update
+        LazyLock.update = original_update
       LazyConfig.plugins = original_plugins
       LazyConfig.spec = original_spec
       LazyGit.info = original_git_info
@@ -286,10 +282,13 @@ describe("super_lazy init module", function()
         return nil
       end
 
-      -- Call write_lockfiles directly (simulate what ensure_lockfiles_updated does)
-      -- We can't test vim.schedule directly, but we can test the underlying function
-      local ok = pcall(super_lazy.write_lockfiles)
-      assert.is_true(ok)
+      -- Call write_lockfiles (async)
+      super_lazy.write_lockfiles()
+
+      -- Wait for async completion
+      wait_for(function()
+        return vim.fn.filereadable(repo1 .. "/lazy-lock.json") == 1
+      end)
 
       -- Verify lockfile was created
       assert.equals(1, vim.fn.filereadable(repo1 .. "/lazy-lock.json"))
@@ -357,20 +356,19 @@ describe("super_lazy init module", function()
       })
 
       -- Setup should detect timestamp mismatch and sync
-      local called_write_lockfiles_async = false
-      local original_write_lockfiles_async = super_lazy.write_lockfiles_async
-      super_lazy.write_lockfiles_async = function()
-        called_write_lockfiles_async = true
+      local called_write_lockfiles = false
+      local original_write_lockfiles = super_lazy.write_lockfiles
+      super_lazy.write_lockfiles = function()
+        called_write_lockfiles = true
       end
 
       super_lazy.setup({ lockfile_repo_dirs = { repo1, repo2 } })
-      -- Verify super_lazy.write_lockfiles_async was called (which means needs sync returned true)
-      assert.is_true(called_write_lockfiles_async)
+      -- Verify super_lazy.write_lockfiles was called (which means needs sync returned true)
+      assert.is_true(called_write_lockfiles)
 
       -- Cleanup
-      super_lazy.write_lockfiles_async = original_write_lockfiles_async
-      async.reset()
-      LazyConfig.options.lockfile = original_lockfile
+      super_lazy.write_lockfiles = original_write_lockfiles
+        LazyConfig.options.lockfile = original_lockfile
       cache.clear_all()
       vim.fn.delete(test_dir, "rf")
     end)
@@ -403,19 +401,18 @@ describe("super_lazy init module", function()
       -- repo2 lockfile is MISSING
 
       -- Setup should detect missing split lockfile
-      local called_write_lockfiles_async = false
-      local original_write_lockfiles_async = super_lazy.write_lockfiles_async
-      super_lazy.write_lockfiles_async = function()
-        called_write_lockfiles_async = true
+      local called_write_lockfiles = false
+      local original_write_lockfiles = super_lazy.write_lockfiles
+      super_lazy.write_lockfiles = function()
+        called_write_lockfiles = true
       end
 
       super_lazy.setup({ lockfile_repo_dirs = { repo1, repo2 } })
-      assert.is_true(called_write_lockfiles_async)
+      assert.is_true(called_write_lockfiles)
 
       -- Cleanup
-      super_lazy.write_lockfiles_async = original_write_lockfiles_async
-      async.reset()
-      LazyConfig.options.lockfile = original_lockfile
+      super_lazy.write_lockfiles = original_write_lockfiles
+        LazyConfig.options.lockfile = original_lockfile
       cache.clear_all()
       vim.fn.delete(test_dir, "rf")
     end)
@@ -449,21 +446,20 @@ describe("super_lazy init module", function()
       lockfile.write(repo2 .. "/lazy-lock.json", { ["plugin2"] = { branch = "main", commit = "def456" } })
 
       -- Setup should NOT trigger sync (lockfiles in sync)
-      local called_write_lockfiles_async = false
-      local original_write_lockfiles_async = super_lazy.write_lockfiles_async
-      super_lazy.write_lockfiles_async = function()
-        called_write_lockfiles_async = true
+      local called_write_lockfiles = false
+      local original_write_lockfiles = super_lazy.write_lockfiles
+      super_lazy.write_lockfiles = function()
+        called_write_lockfiles = true
       end
 
       super_lazy.setup({ lockfile_repo_dirs = { repo1, repo2 } })
 
-      -- Verify write_lockfiles_async was NOT called (because lockfiles were in sync)
-      assert.is_false(called_write_lockfiles_async)
+      -- Verify write_lockfiles was NOT called (because lockfiles were in sync)
+      assert.is_false(called_write_lockfiles)
 
       -- Cleanup
-      super_lazy.write_lockfiles_async = original_write_lockfiles_async
-      async.reset()
-      LazyConfig.options.lockfile = original_lockfile
+      super_lazy.write_lockfiles = original_write_lockfiles
+        LazyConfig.options.lockfile = original_lockfile
       cache.clear_all()
       vim.fn.delete(test_dir, "rf")
     end)
@@ -499,7 +495,7 @@ describe("super_lazy init module", function()
       local original_plugins = LazyConfig.plugins
       local original_spec = LazyConfig.spec
       local original_git_info = LazyGit.info
-      local original_get_plugin_source = Source.get_plugin_source
+      local original_get_plugin_source = Source.lookup_plugin_in_index
 
       -- Mock parent and nested plugins
       LazyConfig.plugins = {
@@ -530,7 +526,7 @@ describe("super_lazy init module", function()
       end
 
       -- Mock get_plugin_source to indicate plenary is a recipe plugin of lazy.nvim
-      Source.get_plugin_source = function(plugin_name, with_recipe)
+      Source.lookup_plugin_in_index = function(plugin_name, with_recipe)
         if plugin_name == "lazy.nvim" then
           if with_recipe then
             return repo1, nil -- Not a recipe
@@ -545,9 +541,13 @@ describe("super_lazy init module", function()
         error("Plugin not found")
       end
 
-      -- Call write_lockfiles
-      local ok = pcall(super_lazy.write_lockfiles)
-      assert.is_true(ok)
+      -- Call write_lockfiles (async)
+      super_lazy.write_lockfiles()
+
+      -- Wait for lockfile to be written
+      wait_for(function()
+        return vim.fn.filereadable(repo1 .. "/lazy-lock.json") == 1
+      end)
 
       -- Verify lockfile was created
       local lockfile_data = lockfile.read(repo1 .. "/lazy-lock.json")
@@ -566,7 +566,7 @@ describe("super_lazy init module", function()
       LazyConfig.plugins = original_plugins
       LazyConfig.spec = original_spec
       LazyGit.info = original_git_info
-      Source.get_plugin_source = original_get_plugin_source
+      Source.lookup_plugin_in_index = original_get_plugin_source
       cache.clear_all()
       vim.fn.delete(test_dir, "rf")
     end)
@@ -621,7 +621,7 @@ describe("super_lazy init module", function()
 
       local original_plugins = LazyConfig.plugins
       local original_spec = LazyConfig.spec
-      local original_get_plugin_source = Source.get_plugin_source
+      local original_get_plugin_source = Source.lookup_plugin_in_index
 
       LazyConfig.plugins = {}
       LazyConfig.spec = {
@@ -634,7 +634,7 @@ describe("super_lazy init module", function()
         plugins = {},
       }
 
-      Source.get_plugin_source = function(plugin_name, with_recipe)
+      Source.lookup_plugin_in_index = function(plugin_name, with_recipe)
         if plugin_name == "parent-plugin" or plugin_name == "nested-plugin" then
           if with_recipe then
             return temp_config, plugin_name == "nested-plugin" and "parent-plugin" or nil
@@ -644,8 +644,13 @@ describe("super_lazy init module", function()
         error("Plugin not found")
       end
 
-      local ok = pcall(super_lazy.write_lockfiles)
-      assert.is_true(ok)
+      -- Call write_lockfiles (async)
+      super_lazy.write_lockfiles()
+
+      -- Wait for lockfile to be written
+      wait_for(function()
+        return vim.fn.filereadable(temp_config .. "/lazy-lock.json") == 1
+      end)
 
       local result_lockfile = lockfile.read(temp_config .. "/lazy-lock.json")
 
@@ -661,7 +666,7 @@ describe("super_lazy init module", function()
       vim.fn.stdpath = original_stdpath
       LazyConfig.plugins = original_plugins
       LazyConfig.spec = original_spec
-      Source.get_plugin_source = original_get_plugin_source
+      Source.lookup_plugin_in_index = original_get_plugin_source
       cache.clear_all()
       lockfile.clear_cache()
       vim.fn.delete(temp_config, "rf")
@@ -704,7 +709,7 @@ describe("super_lazy init module", function()
       local original_plugins = LazyConfig.plugins
       local original_spec = LazyConfig.spec
       local original_lockfile = LazyConfig.options.lockfile
-      local original_get_plugin_source = Source.get_plugin_source
+      local original_get_plugin_source = Source.lookup_plugin_in_index
 
       -- Parent plugin is disabled, nested plugin is not in any list
       LazyConfig.plugins = {}
@@ -725,7 +730,7 @@ describe("super_lazy init module", function()
       LazyConfig.options = { lockfile = temp_lazy_lock }
 
       -- Mock get_plugin_source
-      Source.get_plugin_source = function(plugin_name, with_recipe)
+      Source.lookup_plugin_in_index = function(plugin_name, with_recipe)
         if plugin_name == "lazy.nvim" then
           if with_recipe then
             return repo1, nil -- Not a recipe
@@ -735,9 +740,13 @@ describe("super_lazy init module", function()
         error("Plugin not found")
       end
 
-      -- Call write_lockfiles
-      local ok = pcall(super_lazy.write_lockfiles)
-      assert.is_true(ok)
+      -- Call write_lockfiles (async)
+      super_lazy.write_lockfiles()
+
+      -- Wait for lockfile to be written
+      wait_for(function()
+        return vim.fn.filereadable(repo1 .. "/lazy-lock.json") == 1
+      end)
 
       -- Verify lockfile contains both parent and nested plugins
       local lockfile_data = lockfile.read(repo1 .. "/lazy-lock.json")
@@ -757,7 +766,7 @@ describe("super_lazy init module", function()
       LazyConfig.plugins = original_plugins
       LazyConfig.spec = original_spec
       LazyConfig.options = { lockfile = original_lockfile }
-      Source.get_plugin_source = original_get_plugin_source
+      Source.lookup_plugin_in_index = original_get_plugin_source
       cache.clear_all()
       vim.fn.delete(test_dir, "rf")
       vim.fn.delete(temp_lazy_lock)
@@ -793,7 +802,7 @@ describe("super_lazy init module", function()
       local original_plugins = LazyConfig.plugins
       local original_spec = LazyConfig.spec
       local original_lockfile = LazyConfig.options.lockfile
-      local original_get_plugin_source = Source.get_plugin_source
+      local original_get_plugin_source = Source.lookup_plugin_in_index
 
       -- Plugin is disabled (not installed)
       LazyConfig.plugins = {}
@@ -814,7 +823,7 @@ describe("super_lazy init module", function()
       LazyConfig.options = { lockfile = temp_lazy_lock }
 
       -- Mock get_plugin_source
-      Source.get_plugin_source = function(plugin_name, with_recipe)
+      Source.lookup_plugin_in_index = function(plugin_name, with_recipe)
         if plugin_name == "plenary.nvim" then
           if with_recipe then
             return repo1, nil -- Not a recipe
@@ -824,9 +833,13 @@ describe("super_lazy init module", function()
         error("Plugin not found")
       end
 
-      -- Call write_lockfiles
-      local ok = pcall(super_lazy.write_lockfiles)
-      assert.is_true(ok)
+      -- Call write_lockfiles (async)
+      super_lazy.write_lockfiles()
+
+      -- Wait for lockfile to be written
+      wait_for(function()
+        return vim.fn.filereadable(repo1 .. "/lazy-lock.json") == 1
+      end)
 
       -- Verify lockfile contains the disabled plugin
       local lockfile_data = lockfile.read(repo1 .. "/lazy-lock.json")
@@ -842,7 +855,7 @@ describe("super_lazy init module", function()
       LazyConfig.plugins = original_plugins
       LazyConfig.spec = original_spec
       LazyConfig.options = { lockfile = original_lockfile }
-      Source.get_plugin_source = original_get_plugin_source
+      Source.lookup_plugin_in_index = original_get_plugin_source
       cache.clear_all()
       vim.fn.delete(test_dir, "rf")
       vim.fn.delete(temp_lazy_lock)
@@ -901,8 +914,7 @@ describe("super_lazy init module", function()
       assert.equals("abc123", lockfile_data["plenary.nvim"].commit)
 
       -- Cleanup
-      async.reset()
-      LazyLock.update = original_update
+        LazyLock.update = original_update
       cache.clear_all()
       vim.fn.delete(test_dir, "rf")
     end)
@@ -942,8 +954,7 @@ describe("super_lazy init module", function()
       assert.is_nil(lockfile_data["some-removed-plugin.nvim"])
 
       -- Cleanup
-      async.reset()
-      LazyLock.update = original_update
+        LazyLock.update = original_update
       cache.clear_all()
       vim.fn.delete(test_dir, "rf")
     end)
@@ -1011,8 +1022,7 @@ describe("super_lazy init module", function()
       assert.is_nil(lockfile2["tokyonight.nvim"])
 
       -- Cleanup
-      async.reset()
-      LazyLock.update = original_update
+        LazyLock.update = original_update
       cache.clear_all()
       vim.fn.delete(test_dir, "rf")
     end)
@@ -1090,8 +1100,7 @@ describe("super_lazy init module", function()
       end)
 
       -- Restore
-      async.reset()
-      vim.notify = original_notify
+        vim.notify = original_notify
       LazyConfig.plugins = original_plugins
       LazyConfig.spec = original_spec
       LazyGit.info = original_git_info
@@ -1178,8 +1187,7 @@ describe("super_lazy init module", function()
       end)
 
       -- Restore
-      async.reset()
-      vim.notify = original_notify
+        vim.notify = original_notify
       LazyConfig.plugins = original_plugins
       LazyConfig.spec = original_spec
       LazyGit.info = original_git_info
@@ -1269,8 +1277,7 @@ describe("super_lazy init module", function()
       end)
 
       -- Restore
-      async.reset()
-      vim.notify = original_notify
+        vim.notify = original_notify
       LazyConfig.plugins = original_plugins
       LazyConfig.spec = original_spec
       LazyGit.info = original_git_info
@@ -1368,8 +1375,7 @@ describe("super_lazy init module", function()
       end)
 
       -- Restore
-      async.reset()
-      vim.notify = original_notify
+        vim.notify = original_notify
       LazyConfig.plugins = original_plugins
       LazyConfig.spec = original_spec
       LazyGit.info = original_git_info
@@ -1434,8 +1440,7 @@ describe("super_lazy init module", function()
       end)
 
       -- Restore
-      async.reset()
-      vim.notify = original_notify
+        vim.notify = original_notify
       LazyConfig.plugins = original_plugins
       LazyConfig.spec = original_spec
 
