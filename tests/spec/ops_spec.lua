@@ -306,19 +306,13 @@ describe("super_lazy ops module", function()
       end
 
       -- Mock get_plugin_source to indicate plenary is a recipe plugin of lazy.nvim
-      Source.get_plugin_source = function(plugin_name, with_recipe)
+      Source.get_plugin_source = function(plugin_name)
         if plugin_name == "lazy.nvim" then
-          if with_recipe then
-            return repo1, nil -- Not a recipe
-          end
-          return repo1
+          return repo1, nil, nil -- Not a recipe
         elseif plugin_name == "plenary.nvim" then
-          if with_recipe then
-            return repo1, "lazy.nvim" -- IS a recipe, parent is lazy.nvim
-          end
-          return repo1
+          return repo1, "lazy.nvim", nil -- IS a recipe, parent is lazy.nvim
         end
-        error("Plugin not found")
+        return nil, nil, "Plugin not found"
       end
 
       -- Call write_lockfiles (async)
@@ -409,14 +403,13 @@ describe("super_lazy ops module", function()
         plugins = {},
       }
 
-      Source.get_plugin_source = function(plugin_name, with_recipe)
-        if plugin_name == "parent-plugin" or plugin_name == "nested-plugin" then
-          if with_recipe then
-            return temp_config, plugin_name == "nested-plugin" and "parent-plugin" or nil
-          end
-          return temp_config
+      Source.get_plugin_source = function(plugin_name)
+        if plugin_name == "parent-plugin" then
+          return temp_config, nil, nil
+        elseif plugin_name == "nested-plugin" then
+          return temp_config, "parent-plugin", nil
         end
-        error("Plugin not found")
+        return nil, nil, "Plugin not found"
       end
 
       -- Call write_lockfiles (async)
@@ -500,14 +493,11 @@ describe("super_lazy ops module", function()
       LazyConfig.options = { lockfile = temp_lazy_lock }
 
       -- Mock get_plugin_source
-      Source.get_plugin_source = function(plugin_name, with_recipe)
+      Source.get_plugin_source = function(plugin_name)
         if plugin_name == "lazy.nvim" then
-          if with_recipe then
-            return repo1, nil -- Not a recipe
-          end
-          return repo1
+          return repo1, nil, nil
         end
-        error("Plugin not found")
+        return nil, nil, "Plugin not found"
       end
 
       -- Call write_lockfiles (async)
@@ -540,6 +530,158 @@ describe("super_lazy ops module", function()
       Source.clear_all()
       vim.fn.delete(test_dir, "rf")
       vim.fn.delete(temp_lazy_lock)
+    end)
+
+    it("should skip local plugins with is_local flag", function()
+      -- Create temporary test directory
+      local test_dir = "/tmp/super_lazy_local_test_" .. os.time()
+      local repo1 = test_dir .. "/repo1"
+
+      vim.fn.mkdir(repo1 .. "/plugins", "p")
+      vim.fn.writefile({
+        "return {",
+        '  { "nvim-lua/plenary.nvim" },',
+        "}",
+      }, repo1 .. "/plugins/core.lua")
+
+      -- Setup config
+      Source.clear_all()
+      local Config = require("super_lazy.config")
+      Config.setup({
+        lockfile_repo_dirs = { repo1 },
+      })
+
+      -- Mock lazy.nvim structures
+      local LazyGit = require("lazy.manage.git")
+
+      local original_plugins = LazyConfig.plugins
+      local original_spec = LazyConfig.spec
+      local original_git_info = LazyGit.info
+
+      LazyConfig.plugins = {
+        {
+          name = "plenary.nvim",
+          dir = "/tmp/lazy/plenary.nvim",
+          _ = { installed = true },
+        },
+        {
+          name = "my-local-plugin",
+          dir = "/home/user/projects/my-local-plugin",
+          _ = { installed = true, is_local = true },
+        },
+      }
+
+      LazyConfig.spec = {
+        disabled = {},
+        plugins = {},
+      }
+
+      LazyGit.info = function(dir)
+        if dir:match("plenary") then
+          return { branch = "master", commit = "abc123" }
+        elseif dir:match("my%-local%-plugin") then
+          return { branch = "main", commit = "local123" }
+        end
+        return nil
+      end
+
+      -- Call write_lockfiles (async)
+      local completed = false
+      Ops.write_lockfiles({
+        on_complete = function()
+          completed = true
+        end,
+      })
+
+      -- Wait for async completion
+      wait_for(function()
+        return completed
+      end)
+
+      -- Verify lockfile was created
+      local lockfile_data = lockfile.read(repo1 .. "/lazy-lock.json")
+
+      -- plenary should be in lockfile
+      assert.is_not_nil(lockfile_data["plenary.nvim"])
+
+      -- local plugin should NOT be in lockfile
+      assert.is_nil(lockfile_data["my-local-plugin"])
+
+      -- Cleanup
+      LazyConfig.plugins = original_plugins
+      LazyConfig.spec = original_spec
+      LazyGit.info = original_git_info
+      Source.clear_all()
+      vim.fn.delete(test_dir, "rf")
+    end)
+
+    it("should call on_complete callback with table options", function()
+      -- Create temporary test directory
+      local test_dir = "/tmp/super_lazy_callback_test_" .. os.time()
+      local repo1 = test_dir .. "/repo1"
+
+      vim.fn.mkdir(repo1 .. "/plugins", "p")
+      vim.fn.writefile({
+        "return {",
+        '  { "nvim-lua/plenary.nvim" },',
+        "}",
+      }, repo1 .. "/plugins/core.lua")
+
+      -- Setup config
+      Source.clear_all()
+      local Config = require("super_lazy.config")
+      Config.setup({
+        lockfile_repo_dirs = { repo1 },
+      })
+
+      -- Mock lazy.nvim structures
+      local LazyGit = require("lazy.manage.git")
+
+      local original_plugins = LazyConfig.plugins
+      local original_spec = LazyConfig.spec
+      local original_git_info = LazyGit.info
+
+      LazyConfig.plugins = {
+        {
+          name = "plenary.nvim",
+          dir = "/tmp/lazy/plenary.nvim",
+          _ = { installed = true },
+        },
+      }
+
+      LazyConfig.spec = {
+        disabled = {},
+        plugins = {},
+      }
+
+      LazyGit.info = function(dir)
+        if dir:match("plenary") then
+          return { branch = "master", commit = "abc123" }
+        end
+        return nil
+      end
+
+      -- Call write_lockfiles with table options
+      local callback_called = false
+      Ops.write_lockfiles({
+        on_complete = function()
+          callback_called = true
+        end,
+      })
+
+      -- Wait for callback
+      wait_for(function()
+        return callback_called
+      end)
+
+      assert.is_true(callback_called)
+
+      -- Cleanup
+      LazyConfig.plugins = original_plugins
+      LazyConfig.spec = original_spec
+      LazyGit.info = original_git_info
+      Source.clear_all()
+      vim.fn.delete(test_dir, "rf")
     end)
 
     it("should preserve lockfile entries for disabled non-recipe plugins", function()
@@ -1186,6 +1328,97 @@ describe("super_lazy ops module", function()
       -- Verify notifications - should show syncing and results for each
       assert.is_true(#notifications >= 3)
       assert.is_truthy(notifications[1].msg:match("Syncing lockfiles"))
+
+      -- Cleanup
+      Source.clear_all()
+      vim.fn.delete(test_dir, "rf")
+    end)
+
+    it("should report Detected for newly indexed plugin", function()
+      -- Create temporary test directory
+      local test_dir = "/tmp/super_lazy_refresh_detected_test_" .. os.time()
+      local repo1 = test_dir .. "/repo1"
+
+      vim.fn.mkdir(repo1 .. "/plugins", "p")
+
+      vim.fn.writefile({
+        "return {",
+        '  { "nvim-lua/plenary.nvim" },',
+        "}",
+      }, repo1 .. "/plugins/core.lua")
+
+      -- Setup config
+      Source.clear_all()
+      local Config = require("super_lazy.config")
+      Config.setup({
+        lockfile_repo_dirs = { repo1 },
+      })
+
+      -- Mock lazy.nvim structures
+      local LazyGit = require("lazy.manage.git")
+
+      local original_plugins = LazyConfig.plugins
+      local original_spec = LazyConfig.spec
+      local original_git_info = LazyGit.info
+
+      LazyConfig.plugins = {
+        {
+          name = "plenary.nvim",
+          dir = "/tmp/lazy/plenary.nvim",
+          _ = { installed = true },
+        },
+      }
+
+      LazyConfig.spec = {
+        disabled = {},
+        plugins = {},
+      }
+
+      LazyGit.info = function(dir)
+        if dir:match("plenary") then
+          return { branch = "master", commit = "abc123" }
+        end
+        return nil
+      end
+
+      -- DON'T build the index first - plugin should be "newly detected"
+      Source.clear_index()
+
+      -- Capture notifications
+      local notifications = {}
+      local original_notify = vim.notify
+      vim.notify = function(msg, level, opts)
+        table.insert(notifications, { msg = msg, level = level })
+      end
+
+      -- Call refresh with single plugin
+      Ops.refresh({ "plenary.nvim" })
+
+      -- Wait for async completion - look for the "Detected" notification
+      wait_for(function()
+        for _, n in ipairs(notifications) do
+          if n.msg:match("Detected plenary.nvim source") then
+            return true
+          end
+        end
+        return false
+      end)
+
+      -- Restore
+      vim.notify = original_notify
+      LazyConfig.plugins = original_plugins
+      LazyConfig.spec = original_spec
+      LazyGit.info = original_git_info
+
+      -- Verify "Detected" notification was shown
+      local found_detected = false
+      for _, n in ipairs(notifications) do
+        if n.msg:match("Detected plenary.nvim source") then
+          found_detected = true
+          break
+        end
+      end
+      assert.is_true(found_detected)
 
       -- Cleanup
       Source.clear_all()

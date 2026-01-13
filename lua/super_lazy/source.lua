@@ -227,7 +227,7 @@ function M.build_index(callback, opts)
   process_next_repo()
 end
 
-function M.get_plugin_source(plugin_name, with_recipe)
+function M.get_plugin_source(plugin_name)
   local repo_paths = M.get_lockfile_repo_paths()
 
   -- Return the first repo path for lazy.nvim

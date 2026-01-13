@@ -242,6 +242,162 @@ describe("super_lazy init module", function()
     end)
   end)
 
+  describe("SuperLazyDebug command", function()
+    it("should be registered after setup", function()
+      Source.clear_all()
+      super_lazy.setup({
+        lockfile_repo_dirs = { vim.fn.stdpath("config") },
+      })
+
+      -- Check command exists
+      local commands = vim.api.nvim_get_commands({})
+      assert.is_not_nil(commands.SuperLazyDebug)
+      assert.equals("?", commands.SuperLazyDebug.nargs)
+    end)
+
+    it("should show index info when called without arguments", function()
+      -- Create temporary test directory
+      local test_dir = "/tmp/super_lazy_debug_test_" .. os.time()
+      local repo1 = test_dir .. "/repo1"
+
+      vim.fn.mkdir(repo1 .. "/plugins", "p")
+      vim.fn.writefile({
+        "return {",
+        '  { "nvim-lua/plenary.nvim" },',
+        "}",
+      }, repo1 .. "/plugins/core.lua")
+
+      Source.clear_all()
+      super_lazy.setup({
+        lockfile_repo_dirs = { repo1 },
+      })
+
+      -- Build the index first
+      local index_built = false
+      Source.build_index(function()
+        index_built = true
+      end)
+      wait_for(function()
+        return index_built
+      end)
+
+      -- Capture notifications
+      local notifications = {}
+      local original_notify = vim.notify
+      vim.notify = function(msg, level, opts)
+        table.insert(notifications, { msg = msg, level = level })
+      end
+
+      -- Run the command without arguments
+      vim.cmd("SuperLazyDebug")
+
+      vim.notify = original_notify
+
+      -- Should show index count
+      local found_count = false
+      for _, n in ipairs(notifications) do
+        if n.msg:match("Index contains %d+ plugins") then
+          found_count = true
+          break
+        end
+      end
+      assert.is_true(found_count)
+
+      -- Cleanup
+      Source.clear_all()
+      vim.fn.delete(test_dir, "rf")
+    end)
+
+    it("should show plugin info when called with plugin name", function()
+      -- Create temporary test directory
+      local test_dir = "/tmp/super_lazy_debug_plugin_test_" .. os.time()
+      local repo1 = test_dir .. "/repo1"
+
+      vim.fn.mkdir(repo1 .. "/plugins", "p")
+      vim.fn.writefile({
+        "return {",
+        '  { "nvim-lua/plenary.nvim" },',
+        "}",
+      }, repo1 .. "/plugins/core.lua")
+
+      Source.clear_all()
+      super_lazy.setup({
+        lockfile_repo_dirs = { repo1 },
+      })
+
+      -- Build the index first
+      local index_built = false
+      Source.build_index(function()
+        index_built = true
+      end)
+      wait_for(function()
+        return index_built
+      end)
+
+      -- Capture print output
+      local printed = {}
+      local original_print = print
+      _G.print = function(msg)
+        table.insert(printed, msg)
+      end
+
+      -- Run the command with plugin name
+      vim.cmd("SuperLazyDebug plenary.nvim")
+
+      _G.print = original_print
+
+      -- Should show plugin info
+      local found_plugin = false
+      local found_index = false
+      for _, msg in ipairs(printed) do
+        if msg:match("Plugin: plenary.nvim") then
+          found_plugin = true
+        end
+        if msg:match("Index: repo=") then
+          found_index = true
+        end
+      end
+      assert.is_true(found_plugin)
+      assert.is_true(found_index)
+
+      -- Cleanup
+      Source.clear_all()
+      vim.fn.delete(test_dir, "rf")
+    end)
+
+    it("should warn when index not built yet", function()
+      Source.clear_all()
+      super_lazy.setup({
+        lockfile_repo_dirs = { vim.fn.stdpath("config") },
+      })
+
+      -- Capture notifications
+      local notifications = {}
+      local original_notify = vim.notify
+      vim.notify = function(msg, level, opts)
+        table.insert(notifications, { msg = msg, level = level })
+      end
+
+      -- Run the command without building index first
+      vim.cmd("SuperLazyDebug")
+
+      vim.notify = original_notify
+
+      -- Should show warning about no index
+      local found_warning = false
+      for _, n in ipairs(notifications) do
+        if n.msg:match("No index built yet") and n.level == vim.log.levels.WARN then
+          found_warning = true
+          break
+        end
+      end
+      assert.is_true(found_warning)
+
+      -- Cleanup
+      Source.clear_all()
+    end)
+  end)
+
   describe("SuperLazyRefresh command", function()
     it("should be registered after setup", function()
       Source.clear_all()

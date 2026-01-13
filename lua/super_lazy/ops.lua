@@ -56,23 +56,15 @@ end
 
 -- opts = {
 --   on_complete = function(),  -- Called when all done (optional)
---   on_cancel = function(),    -- Called if cancelled (optional)
---   silent = bool,             -- If true, suppress progress notifications (optional)
 -- }
 function M.write_lockfiles(opts)
-  local on_complete, on_cancel, silent
+  local on_complete
   if type(opts) == "function" then
     on_complete = opts
-    on_cancel = nil
-    silent = false
   elseif type(opts) == "table" then
     on_complete = opts.on_complete
-    on_cancel = opts.on_cancel
-    silent = opts.silent or false
   else
     on_complete = nil
-    on_cancel = nil
-    silent = false
   end
 
   local all_plugins = {}
@@ -96,18 +88,16 @@ function M.write_lockfiles(opts)
   local original_lockfile = Lockfile.get_cached()
 
   local progress = nil
-  if not silent then
-    local ok, fidget = pcall(require, "fidget")
-    if ok and fidget.progress and fidget.progress.handle then
-      progress = fidget.progress.handle.create({
-        title = "Lockfile Sync",
-        message = "Scanning plugins...",
-        lsp_client = { name = "super_lazy.nvim" },
-        percentage = 0,
-      })
-    else
-      Util.notify("Syncing lockfiles...")
-    end
+  local ok, fidget = pcall(require, "fidget")
+  if ok and fidget.progress and fidget.progress.handle then
+    progress = fidget.progress.handle.create({
+      title = "Lockfile Sync",
+      message = "Scanning plugins...",
+      lsp_client = { name = "super_lazy.nvim" },
+      percentage = 0,
+    })
+  else
+    Util.notify("Syncing lockfiles...")
   end
 
   -- Progress animation queue - shows each update for a minimum duration
@@ -167,7 +157,7 @@ function M.write_lockfiles(opts)
     local function do_post_index_work()
       local results = {}
       for _, plugin in pairs(all_plugins) do
-        local source_repo, parent_plugin, err = Source.get_plugin_source(plugin.name, true)
+        local source_repo, parent_plugin, err = Source.get_plugin_source(plugin.name)
 
         if not err then
           local entry = nil
@@ -207,7 +197,7 @@ function M.write_lockfiles(opts)
       finish_with_animation(function()
         if progress then
           progress:finish()
-        elseif not silent then
+        else
           Util.notify("Lockfiles synced")
         end
 
@@ -262,7 +252,6 @@ function M.refresh(plugin_names)
     Source.clear_all()
 
     M.write_lockfiles({
-      silent = false,
       on_complete = function()
         Util.notify("Refreshed plugin source index and regenerated lockfiles")
       end,
@@ -281,7 +270,6 @@ function M.refresh(plugin_names)
     Source.clear_index()
 
     M.write_lockfiles({
-      silent = false,
       on_complete = function()
         local new_idx = Source.get_index()
         for _, name in ipairs(plugin_names) do
