@@ -156,73 +156,6 @@ function M.setup(user_config)
   end
 end
 
-local function get_cached_git_info(plugin_dir, plugin_name)
-  local cached = Cache.get_git_info(plugin_dir)
-  if cached ~= nil then
-    return cached
-  end
-
-  local info = LazyGit.info(plugin_dir)
-
-  if info then
-    local git_info = {
-      branch = info.branch or LazyGit.get_branch({ dir = plugin_dir, name = plugin_name }),
-      commit = info.commit,
-    }
-    Cache.set_git_info(plugin_dir, git_info)
-    return git_info
-  end
-
-  Cache.set_git_info(plugin_dir, false)
-  return nil
-end
-
-local function collect_all_plugins()
-  local all_plugins = {}
-
-  local plugin_sources = {
-    LazyConfig.plugins or {},
-    LazyConfig.spec.disabled or {},
-    LazyConfig.spec.plugins or {},
-  }
-
-  for _, plugin_source in ipairs(plugin_sources) do
-    for _, plugin in pairs(plugin_source) do
-      if plugin.name and not all_plugins[plugin.name] then
-        if not (plugin._ and plugin._.is_local) then
-          all_plugins[plugin.name] = plugin
-        end
-      end
-    end
-  end
-
-  return all_plugins
-end
-
-local function build_lockfile_entry(plugin, parent_plugin, existing_lockfile, original_lockfile)
-  if plugin._ and plugin._.installed then
-    local git_info = get_cached_git_info(plugin.dir, plugin.name)
-    if git_info then
-      local entry = {
-        branch = git_info.branch,
-        commit = git_info.commit,
-      }
-      if parent_plugin then
-        entry.source = parent_plugin
-      end
-      return entry
-    end
-    return nil
-  end
-
-  -- For disabled/uninstalled plugins, try to restore from existing lockfile or git HEAD
-  local entry = existing_lockfile[plugin.name]
-  if not entry and original_lockfile then
-    entry = original_lockfile[plugin.name]
-  end
-  return entry
-end
-
 local function finalize_lockfiles(results, existing_lockfile, original_lockfile)
   local plugins_by_source = {}
   local plugin_source_map = {}
@@ -241,7 +174,7 @@ local function finalize_lockfiles(results, existing_lockfile, original_lockfile)
     end
   end
 
-  -- Update the persistent cache with all plugins
+  -- Update the persistent cache with all plugin sources
   Cache.set_all_plugin_sources(plugin_source_map)
 
   -- Preserve nested plugins whos parent is still in the lockfile
@@ -299,7 +232,22 @@ function M.write_lockfiles(opts)
     silent = false
   end
 
-  local all_plugins = collect_all_plugins()
+  local all_plugins = {}
+  local plugin_sources = {
+    LazyConfig.plugins or {},
+    LazyConfig.spec.disabled or {},
+    LazyConfig.spec.plugins or {},
+  }
+  for _, plugin_source in ipairs(plugin_sources) do
+    for _, plugin in pairs(plugin_source) do
+      if plugin.name and not all_plugins[plugin.name] then
+        if not (plugin._ and plugin._.is_local) then
+          all_plugins[plugin.name] = plugin
+        end
+      end
+    end
+  end
+
   local main_lockfile = LazyConfig.options.lockfile
   local existing_lockfile = Lockfile.read(main_lockfile)
   local original_lockfile = Lockfile.get_cached()
@@ -326,10 +274,47 @@ function M.write_lockfiles(opts)
         local source_repo, parent_plugin, err = Source.lookup_plugin_in_index(plugin.name, true)
 
         if not err then
+          local entry = nil
+          if plugin._ and plugin._.installed then
+            -- Get git info with caching
+            local git_info = Cache.get_git_info(plugin.dir)
+            if git_info == nil then
+              local info = LazyGit.info(plugin.dir)
+              if info then
+                git_info = {
+                  branch = info.branch or LazyGit.get_branch({ dir = plugin.dir, name = plugin.name }),
+                  commit = info.commit,
+                }
+                Cache.set_git_info(plugin.dir, git_info)
+              else
+                Cache.set_git_info(plugin.dir, false)
+                git_info = nil
+              end
+            elseif git_info == false then
+              git_info = nil
+            end
+
+            if git_info then
+              entry = {
+                branch = git_info.branch,
+                commit = git_info.commit,
+              }
+              if parent_plugin then
+                entry.source = parent_plugin
+              end
+            end
+          else
+            -- For disabled/uninstalled plugins, try to restore from existing lockfile or git HEAD
+            entry = existing_lockfile[plugin.name]
+            if not entry and original_lockfile then
+              entry = original_lockfile[plugin.name]
+            end
+          end
+
           results[plugin.name] = {
             repo = source_repo,
             parent = parent_plugin,
-            entry = build_lockfile_entry(plugin, parent_plugin, existing_lockfile, original_lockfile),
+            entry = entry,
           }
         end
       end
@@ -390,24 +375,6 @@ local function restore_cleaned_plugins(pre_clean_lockfiles)
   end
 end
 
-local function notify_plugin_refresh_results(plugin_names, old_sources)
-  for _, name in ipairs(plugin_names) do
-    local old_repo = old_sources[name] and old_sources[name].repo or nil
-    local new_source = Cache.get_plugin_source(name)
-    local new_repo = new_source and new_source.repo or nil
-
-    if not new_repo then
-      Util.notify("Plugin '" .. name .. "' not found in any configured repository", vim.log.levels.WARN)
-    elseif not old_repo then
-      Util.notify("Detected " .. name .. " source: " .. Util.format_path(new_repo))
-    elseif old_repo ~= new_repo then
-      Util.notify("Moved " .. name .. " from " .. Util.format_path(old_repo) .. " to " .. Util.format_path(new_repo))
-    else
-      Util.notify(name .. " source unchanged (" .. Util.format_path(new_repo) .. ")")
-    end
-  end
-end
-
 function M.refresh(plugin_names)
   if #plugin_names == 0 then
     Cache.clear_all()
@@ -428,7 +395,23 @@ function M.refresh(plugin_names)
     M.write_lockfiles({
       silent = false,
       on_complete = function()
-        notify_plugin_refresh_results(plugin_names, old_sources)
+        for _, name in ipairs(plugin_names) do
+          local old_repo = old_sources[name] and old_sources[name].repo or nil
+          local new_source = Cache.get_plugin_source(name)
+          local new_repo = new_source and new_source.repo or nil
+
+          if not new_repo then
+            Util.notify("Plugin '" .. name .. "' not found in any configured repository", vim.log.levels.WARN)
+          elseif not old_repo then
+            Util.notify("Detected " .. name .. " source: " .. Util.format_path(new_repo))
+          elseif old_repo ~= new_repo then
+            Util.notify(
+              "Moved " .. name .. " from " .. Util.format_path(old_repo) .. " to " .. Util.format_path(new_repo)
+            )
+          else
+            Util.notify(name .. " source unchanged (" .. Util.format_path(new_repo) .. ")")
+          end
+        end
       end,
     })
   end
@@ -444,7 +427,7 @@ function M.setup_lazy_hooks()
       local original_ok, original_err = pcall(original_update)
       if not original_ok then
         Util.notify("Error in lazy update: " .. tostring(original_err), vim.log.levels.ERROR)
-        return
+        return -- Don't try additional lockfile handling if lazy update failed
       end
 
       M.write_lockfiles({
