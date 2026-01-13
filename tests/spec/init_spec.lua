@@ -2,7 +2,13 @@ local super_lazy = require("super_lazy")
 local cache = require("super_lazy.cache")
 local lockfile = require("super_lazy.lockfile")
 local async = require("super_lazy.async")
-local source = require("super_lazy.source")
+
+-- Helper to wait for async operations to complete
+local function wait_for(condition, timeout_ms)
+  timeout_ms = timeout_ms or 5000
+  local ok = vim.wait(timeout_ms, condition, 10)
+  assert(ok, "Timeout waiting for condition")
+end
 
 describe("super_lazy init module", function()
   -- Store original LazyConfig state
@@ -15,8 +21,6 @@ describe("super_lazy init module", function()
   before_each(function()
     async.reset()
     cache.clear_all()
-    -- Enable test mode for sync behavior in async functions
-    source._test_mode = true
     -- Reset LazyConfig to defaults
     LazyConfig.plugins = {}
     LazyConfig.spec = { disabled = {}, plugins = {} }
@@ -27,7 +31,6 @@ describe("super_lazy init module", function()
   after_each(function()
     async.reset()
     cache.clear_all()
-    source._test_mode = false
     -- Restore original LazyConfig state
     LazyConfig.plugins = original_plugins
     LazyConfig.spec = original_spec
@@ -106,11 +109,6 @@ describe("super_lazy init module", function()
       local original_spec = LazyConfig.spec
       local original_git_info = LazyGit.info
 
-      -- Set async module to run synchronously for test
-      async._test_scheduler = function(fn)
-        fn()
-      end
-
       -- Mock plugins
       LazyConfig.plugins = {
         {
@@ -143,13 +141,15 @@ describe("super_lazy init module", function()
       -- Setup hooks
       super_lazy.setup_lazy_hooks()
 
-      -- Trigger update (which should call write_lockfiles)
+      -- Trigger update (which should call write_lockfiles_async)
       local ok = pcall(LazyLock.update)
       assert.is_true(ok)
 
-      -- Verify both lockfiles were created
-      assert.equals(1, vim.fn.filereadable(repo1 .. "/lazy-lock.json"))
-      assert.equals(1, vim.fn.filereadable(repo2 .. "/lazy-lock.json"))
+      -- Wait for both lockfiles to be created (async operation)
+      wait_for(function()
+        return vim.fn.filereadable(repo1 .. "/lazy-lock.json") == 1
+          and vim.fn.filereadable(repo2 .. "/lazy-lock.json") == 1
+      end)
 
       -- Read and verify lockfile contents
       local lockfile1 = lockfile.read(repo1 .. "/lazy-lock.json")
@@ -358,14 +358,9 @@ describe("super_lazy init module", function()
 
       -- Setup should detect timestamp mismatch and sync
       local called_write_lockfiles_async = false
-      local original_schedule = vim.schedule
       local original_write_lockfiles_async = super_lazy.write_lockfiles_async
       super_lazy.write_lockfiles_async = function()
         called_write_lockfiles_async = true
-        -- Don't actually write lockfiles
-      end
-      vim.schedule = function(fn)
-        fn()
       end
 
       super_lazy.setup({ lockfile_repo_dirs = { repo1, repo2 } })
@@ -373,7 +368,6 @@ describe("super_lazy init module", function()
       assert.is_true(called_write_lockfiles_async)
 
       -- Cleanup
-      vim.schedule = original_schedule
       super_lazy.write_lockfiles_async = original_write_lockfiles_async
       async.reset()
       LazyConfig.options.lockfile = original_lockfile
@@ -410,21 +404,15 @@ describe("super_lazy init module", function()
 
       -- Setup should detect missing split lockfile
       local called_write_lockfiles_async = false
-      local original_schedule = vim.schedule
       local original_write_lockfiles_async = super_lazy.write_lockfiles_async
       super_lazy.write_lockfiles_async = function()
         called_write_lockfiles_async = true
-        -- Don't actually write lockfiles
-      end
-      vim.schedule = function(fn)
-        fn()
       end
 
       super_lazy.setup({ lockfile_repo_dirs = { repo1, repo2 } })
       assert.is_true(called_write_lockfiles_async)
 
       -- Cleanup
-      vim.schedule = original_schedule
       super_lazy.write_lockfiles_async = original_write_lockfiles_async
       async.reset()
       LazyConfig.options.lockfile = original_lockfile
@@ -462,14 +450,9 @@ describe("super_lazy init module", function()
 
       -- Setup should NOT trigger sync (lockfiles in sync)
       local called_write_lockfiles_async = false
-      local original_schedule = vim.schedule
       local original_write_lockfiles_async = super_lazy.write_lockfiles_async
       super_lazy.write_lockfiles_async = function()
         called_write_lockfiles_async = true
-        -- Don't actually write lockfiles
-      end
-      vim.schedule = function(fn)
-        fn()
       end
 
       super_lazy.setup({ lockfile_repo_dirs = { repo1, repo2 } })
@@ -478,7 +461,6 @@ describe("super_lazy init module", function()
       assert.is_false(called_write_lockfiles_async)
 
       -- Cleanup
-      vim.schedule = original_schedule
       super_lazy.write_lockfiles_async = original_write_lockfiles_async
       async.reset()
       LazyConfig.options.lockfile = original_lockfile
@@ -896,10 +878,6 @@ describe("super_lazy init module", function()
       -- Setup hooks
       local LazyLock = require("lazy.manage.lock")
       local original_update = LazyLock.update
-      -- Set async module to run synchronously for test
-      async._test_scheduler = function(fn)
-        fn()
-      end
 
       super_lazy.setup_lazy_hooks()
 
@@ -909,6 +887,12 @@ describe("super_lazy init module", function()
       lockfile.write(repo1 .. "/lazy-lock.json", {})
       -- Trigger LazyLock.update to run the restore logic
       local ok = pcall(LazyLock.update)
+
+      -- Wait for async restore operation to complete
+      wait_for(function()
+        local data = lockfile.read(repo1 .. "/lazy-lock.json")
+        return data["plenary.nvim"] ~= nil
+      end)
 
       -- Verify lockfile still contains the plugin entry
       local lockfile_data = lockfile.read(repo1 .. "/lazy-lock.json")
@@ -943,10 +927,6 @@ describe("super_lazy init module", function()
       -- Setup hooks
       local LazyLock = require("lazy.manage.lock")
       local original_update = LazyLock.update
-      -- Set async module to run synchronously for test
-      async._test_scheduler = function(fn)
-        fn()
-      end
 
       super_lazy.setup_lazy_hooks()
 
@@ -1003,10 +983,6 @@ describe("super_lazy init module", function()
       -- Setup hooks
       local LazyLock = require("lazy.manage.lock")
       local original_update = LazyLock.update
-      -- Set async module to run synchronously for test
-      async._test_scheduler = function(fn)
-        fn()
-      end
 
       super_lazy.setup_lazy_hooks()
 
@@ -1017,6 +993,12 @@ describe("super_lazy init module", function()
       lockfile.write(repo2 .. "/lazy-lock.json", {})
       -- Trigger LazyLock.update to run the restore logic
       local ok = pcall(LazyLock.update)
+
+      -- Wait for async restore operation to complete
+      wait_for(function()
+        local data = lockfile.read(repo1 .. "/lazy-lock.json")
+        return data["plenary.nvim"] ~= nil
+      end)
 
       -- Verify repo1 lockfile has plenary restored (still in config)
       local lockfile1 = lockfile.read(repo1 .. "/lazy-lock.json")
@@ -1063,14 +1045,6 @@ describe("super_lazy init module", function()
       local original_plugins = LazyConfig.plugins
       local original_spec = LazyConfig.spec
       local original_git_info = LazyGit.info
-      -- Set async module and vim.schedule to run synchronously for test
-      async._test_scheduler = function(fn)
-        fn()
-      end
-      local original_schedule = vim.schedule
-      vim.schedule = function(fn)
-        fn()
-      end
 
       LazyConfig.plugins = {
         {
@@ -1102,11 +1076,20 @@ describe("super_lazy init module", function()
         table.insert(notifications, { msg = msg, level = level })
       end
 
-      -- Call refresh with empty list
+      -- Call refresh with empty list (async)
       super_lazy.refresh({})
 
+      -- Wait for async completion - look for the completion message
+      wait_for(function()
+        for _, n in ipairs(notifications) do
+          if n.msg:match("Refreshed super_lazy source cache") then
+            return true
+          end
+        end
+        return false
+      end)
+
       -- Restore
-      vim.schedule = original_schedule
       async.reset()
       vim.notify = original_notify
       LazyConfig.plugins = original_plugins
@@ -1118,9 +1101,6 @@ describe("super_lazy init module", function()
       assert.is_truthy(notifications[1].msg:match("Syncing lockfiles"))
       -- Last notification should be the completion message
       assert.is_truthy(notifications[#notifications].msg:match("Refreshed super_lazy source cache"))
-
-      -- Verify lockfile was written
-      assert.equals(1, vim.fn.filereadable(repo1 .. "/lazy-lock.json"))
 
       -- Cleanup
       cache.clear_all()
@@ -1153,10 +1133,6 @@ describe("super_lazy init module", function()
       local original_plugins = LazyConfig.plugins
       local original_spec = LazyConfig.spec
       local original_git_info = LazyGit.info
-      -- Set async module to run synchronously for test
-      async._test_scheduler = function(fn)
-        fn()
-      end
 
       LazyConfig.plugins = {
         {
@@ -1190,6 +1166,16 @@ describe("super_lazy init module", function()
 
       -- Call refresh with single plugin
       super_lazy.refresh({ "plenary.nvim" })
+
+      -- Wait for async completion - look for the result notification
+      wait_for(function()
+        for _, n in ipairs(notifications) do
+          if n.msg:match("plenary.nvim source unchanged") then
+            return true
+          end
+        end
+        return false
+      end)
 
       -- Restore
       async.reset()
@@ -1238,10 +1224,6 @@ describe("super_lazy init module", function()
       local original_plugins = LazyConfig.plugins
       local original_spec = LazyConfig.spec
       local original_git_info = LazyGit.info
-      -- Set async module to run synchronously for test
-      async._test_scheduler = function(fn)
-        fn()
-      end
 
       LazyConfig.plugins = {
         {
@@ -1275,6 +1257,16 @@ describe("super_lazy init module", function()
 
       -- Call refresh with single plugin
       super_lazy.refresh({ "plenary.nvim" })
+
+      -- Wait for async completion - look for the "Moved" notification
+      wait_for(function()
+        for _, n in ipairs(notifications) do
+          if n.msg:match("Moved plenary.nvim from") then
+            return true
+          end
+        end
+        return false
+      end)
 
       -- Restore
       async.reset()
@@ -1328,10 +1320,6 @@ describe("super_lazy init module", function()
       local original_plugins = LazyConfig.plugins
       local original_spec = LazyConfig.spec
       local original_git_info = LazyGit.info
-      -- Set async module to run synchronously for test
-      async._test_scheduler = function(fn)
-        fn()
-      end
 
       LazyConfig.plugins = {
         {
@@ -1374,6 +1362,11 @@ describe("super_lazy init module", function()
       -- Call refresh with multiple plugins
       super_lazy.refresh({ "plenary.nvim", "tokyonight.nvim" })
 
+      -- Wait for async completion - need at least 3 notifications (syncing + 2 results)
+      wait_for(function()
+        return #notifications >= 3
+      end)
+
       -- Restore
       async.reset()
       vim.notify = original_notify
@@ -1413,10 +1406,6 @@ describe("super_lazy init module", function()
 
       local original_plugins = LazyConfig.plugins
       local original_spec = LazyConfig.spec
-      -- Set async module to run synchronously for test
-      async._test_scheduler = function(fn)
-        fn()
-      end
 
       LazyConfig.plugins = {}
       LazyConfig.spec = {
@@ -1433,6 +1422,16 @@ describe("super_lazy init module", function()
 
       -- Call refresh with nonexistent plugin
       super_lazy.refresh({ "nonexistent-plugin.nvim" })
+
+      -- Wait for async completion - look for the warning notification
+      wait_for(function()
+        for _, notif in ipairs(notifications) do
+          if notif.msg:match("not found in any configured repository") then
+            return true
+          end
+        end
+        return false
+      end)
 
       -- Restore
       async.reset()

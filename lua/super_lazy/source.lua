@@ -5,8 +5,6 @@ local Util = require("super_lazy.util")
 
 local M = {}
 
-M._test_mode = false
-
 local plugin_index = nil
 
 function M.clear_index()
@@ -330,18 +328,6 @@ local function find_plugin_in_recipe_async(plugin_name, repo_path, callback)
 end
 
 function M.get_plugin_source_async(plugin_name, with_recipe, callback)
-  if M._test_mode then
-    local ok, repo, parent = pcall(function()
-      return M.get_plugin_source(plugin_name, with_recipe)
-    end)
-    if ok then
-      callback(repo, parent, nil)
-    else
-      callback(nil, nil, repo)
-    end
-    return
-  end
-
   local repo_paths = M.get_lockfile_repo_paths()
 
   if plugin_name == "lazy.nvim" then
@@ -472,12 +458,6 @@ local function build_index_sync()
 end
 
 function M.build_index_async(callback)
-  if M._test_mode then
-    local index = build_index_sync()
-    callback(index)
-    return
-  end
-
   local repo_paths = M.get_lockfile_repo_paths()
   local index = {}
   local lazy_path = vim.fn.stdpath("data") .. "/lazy"

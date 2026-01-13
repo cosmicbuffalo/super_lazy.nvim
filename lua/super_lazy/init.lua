@@ -66,15 +66,16 @@ function M.setup(user_config)
   Config.setup(user_config)
 
   M.setup_lazy_hooks()
+  M.setup_user_commands()
 
   -- Check if lazy.nvim updated the main lockfile before our hooks were set up
   -- (e.g., during bootstrap/initial install). Only sync if timestamps indicate it's needed.
-  vim.schedule(function()
-    if needs_lockfile_sync() then
-      ensure_lockfiles_updated()
-    end
-  end)
+  if needs_lockfile_sync() then
+    ensure_lockfiles_updated()
+  end
+end
 
+function M.setup_user_commands()
   local function get_plugin_names_completion()
     local ok, lazy = pcall(require, "lazy")
     if not ok then
@@ -99,13 +100,13 @@ function M.setup(user_config)
     return plugin_names
   end
 
-  -- Async version (default) - non-blocking with progress indicator
   vim.api.nvim_create_user_command("SuperLazyRefresh", function(opts)
     local plugin_names = parse_plugin_names(opts.args)
     if opts.bang then
       -- ! variant runs synchronously
       M.refresh_sync(plugin_names)
     else
+      -- defualt command runs async with progress
       M.refresh(plugin_names)
     end
   end, {
@@ -138,14 +139,20 @@ function M.setup(user_config)
 
       local lines = { "Plugin: " .. plugin_name }
       if cached then
-        table.insert(lines, "  Persistent cache: repo=" .. (cached.repo or "nil") .. ", parent=" .. (cached.parent or "nil"))
+        table.insert(
+          lines,
+          "  Persistent cache: repo=" .. (cached.repo or "nil") .. ", parent=" .. (cached.parent or "nil")
+        )
       else
         table.insert(lines, "  Persistent cache: (not cached)")
       end
 
       if idx and idx[plugin_name] then
         local entry = idx[plugin_name]
-        table.insert(lines, "  In-memory index: repo=" .. (entry.repo or "nil") .. ", parent=" .. (entry.parent or "nil"))
+        table.insert(
+          lines,
+          "  In-memory index: repo=" .. (entry.repo or "nil") .. ", parent=" .. (entry.parent or "nil")
+        )
       else
         table.insert(lines, "  In-memory index: (not in index)")
       end
@@ -182,110 +189,6 @@ local function get_cached_git_info(plugin_dir, plugin_name)
   return nil
 end
 
-function M.write_lockfiles()
-  local main_lockfile = LazyConfig.options.lockfile
-  local existing_lockfile = Lockfile.read(main_lockfile)
-  local original_lockfile = Lockfile.get_cached()
-
-  local plugins_by_source = {}
-
-  local all_plugins = {}
-
-  local plugin_sources = {
-    LazyConfig.plugins or {},
-    LazyConfig.spec.disabled or {},
-    LazyConfig.spec.plugins or {},
-  }
-
-  for _, plugin_source in ipairs(plugin_sources) do
-    for _, plugin in pairs(plugin_source) do
-      if plugin.name and not all_plugins[plugin.name] then
-        if not (plugin._ and plugin._.is_local) then
-          all_plugins[plugin.name] = plugin
-        end
-      end
-    end
-  end
-
-  -- Build the plugin source cache while processing plugins
-  local plugin_source_map = {}
-
-  for _, plugin in pairs(all_plugins) do
-    local source_repo, parent_plugin = Source.get_plugin_source(plugin.name, true)
-    local lockfile_entry = nil
-
-    -- Cache the plugin source mapping
-    plugin_source_map[plugin.name] = {
-      repo = source_repo,
-      parent = parent_plugin,
-    }
-
-    if plugin._ and plugin._.installed then
-      local git_info = get_cached_git_info(plugin.dir, plugin.name)
-      if git_info then
-        lockfile_entry = {
-          branch = git_info.branch,
-          commit = git_info.commit,
-        }
-        if parent_plugin then
-          -- add source for nested plugins
-          lockfile_entry.source = parent_plugin
-        end
-      end
-    else
-      -- For disabled/uninstalled plugins, try to restore from existing lockfile or git HEAD
-      lockfile_entry = existing_lockfile[plugin.name]
-      if not lockfile_entry and original_lockfile then
-        lockfile_entry = original_lockfile[plugin.name]
-      end
-    end
-
-    if lockfile_entry then
-      if not plugins_by_source[source_repo] then
-        plugins_by_source[source_repo] = {}
-      end
-      plugins_by_source[source_repo][plugin.name] = lockfile_entry
-    end
-  end
-
-  -- Update the persistent cache with all plugin sources
-  Cache.set_all_plugin_sources(plugin_source_map)
-
-  -- Preserve nested plugins whose parent is still in the lockfile
-  for source_repo, plugins in pairs(plugins_by_source) do
-    local lockfile_path = source_repo .. "/lazy-lock.json"
-    local existing_repo_lockfile = Lockfile.read(lockfile_path)
-
-    for plugin_name, plugin_entry in pairs(existing_repo_lockfile) do
-      if not plugins[plugin_name] and plugin_entry.source and plugins[plugin_entry.source] then
-        plugins[plugin_name] = plugin_entry
-      end
-    end
-  end
-
-  -- Restore entries from original lockfile (git HEAD) for plugins from disabled parents' lazy.lua files
-  local original_lockfile = Lockfile.get_cached()
-  if original_lockfile then
-    for plugin_name, lock_entry in pairs(original_lockfile) do
-      if lock_entry.source then
-        local parent_plugin = lock_entry.source
-
-        for source_repo, plugins in pairs(plugins_by_source) do
-          if plugins[parent_plugin] and not plugins[plugin_name] then
-            plugins[plugin_name] = lock_entry
-            break
-          end
-        end
-      end
-    end
-  end
-
-  for source_repo, plugins in pairs(plugins_by_source) do
-    local lockfile_path = source_repo .. "/lazy-lock.json"
-    Lockfile.write(lockfile_path, plugins)
-  end
-end
-
 local function collect_all_plugins()
   local all_plugins = {}
 
@@ -305,12 +208,31 @@ local function collect_all_plugins()
     end
   end
 
-  local plugins_list = {}
-  for _, plugin in pairs(all_plugins) do
-    table.insert(plugins_list, plugin)
+  return all_plugins
+end
+
+local function build_lockfile_entry(plugin, parent_plugin, existing_lockfile, original_lockfile)
+  if plugin._ and plugin._.installed then
+    local git_info = get_cached_git_info(plugin.dir, plugin.name)
+    if git_info then
+      local entry = {
+        branch = git_info.branch,
+        commit = git_info.commit,
+      }
+      if parent_plugin then
+        entry.source = parent_plugin
+      end
+      return entry
+    end
+    return nil
   end
 
-  return plugins_list, all_plugins
+  -- For disabled/uninstalled plugins, try to restore from existing lockfile or git HEAD
+  local entry = existing_lockfile[plugin.name]
+  if not entry and original_lockfile then
+    entry = original_lockfile[plugin.name]
+  end
+  return entry
 end
 
 local function finalize_lockfiles(results, existing_lockfile, original_lockfile)
@@ -331,8 +253,10 @@ local function finalize_lockfiles(results, existing_lockfile, original_lockfile)
     end
   end
 
+  -- Update the persistent cache with all plugins
   Cache.set_all_plugin_sources(plugin_source_map)
 
+  -- Preserve nested plugins whos parent is still in the lockfile
   for source_repo, plugins in pairs(plugins_by_source) do
     local lockfile_path = source_repo .. "/lazy-lock.json"
     local existing_repo_lockfile = Lockfile.read(lockfile_path)
@@ -344,6 +268,7 @@ local function finalize_lockfiles(results, existing_lockfile, original_lockfile)
     end
   end
 
+  -- Restore entries from original lockfile (git HEAD) for plugins from disabled parents' lazy.lua files
   if original_lockfile then
     for plugin_name, lock_entry in pairs(original_lockfile) do
       if lock_entry.source then
@@ -363,6 +288,26 @@ local function finalize_lockfiles(results, existing_lockfile, original_lockfile)
     local lockfile_path = source_repo .. "/lazy-lock.json"
     Lockfile.write(lockfile_path, plugins)
   end
+end
+
+function M.write_lockfiles()
+  local main_lockfile = LazyConfig.options.lockfile
+  local existing_lockfile = Lockfile.read(main_lockfile)
+  local original_lockfile = Lockfile.get_cached()
+
+  local all_plugins = collect_all_plugins()
+  local results = {}
+
+  for _, plugin in pairs(all_plugins) do
+    local source_repo, parent_plugin = Source.get_plugin_source(plugin.name, true)
+    results[plugin.name] = {
+      repo = source_repo,
+      parent = parent_plugin,
+      entry = build_lockfile_entry(plugin, parent_plugin, existing_lockfile, original_lockfile),
+    }
+  end
+
+  finalize_lockfiles(results, existing_lockfile, original_lockfile)
 end
 
 -- Async version of write_lockfiles
@@ -387,7 +332,7 @@ function M.write_lockfiles_async(opts)
     silent = false
   end
 
-  local plugins_list = collect_all_plugins()
+  local all_plugins = collect_all_plugins()
   local main_lockfile = LazyConfig.options.lockfile
   local existing_lockfile = Lockfile.read(main_lockfile)
   local original_lockfile = Lockfile.get_cached()
@@ -414,33 +359,14 @@ function M.write_lockfiles_async(opts)
       end
 
       local results = {}
-      for _, plugin in ipairs(plugins_list) do
+      for _, plugin in pairs(all_plugins) do
         local source_repo, parent_plugin, err = Source.lookup_plugin_in_index(plugin.name, true)
 
         if not err then
-          local lockfile_entry = nil
-          if plugin._ and plugin._.installed then
-            local git_info = get_cached_git_info(plugin.dir, plugin.name)
-            if git_info then
-              lockfile_entry = {
-                branch = git_info.branch,
-                commit = git_info.commit,
-              }
-              if parent_plugin then
-                lockfile_entry.source = parent_plugin
-              end
-            end
-          else
-            lockfile_entry = existing_lockfile[plugin.name]
-            if not lockfile_entry and original_lockfile then
-              lockfile_entry = original_lockfile[plugin.name]
-            end
-          end
-
           results[plugin.name] = {
             repo = source_repo,
             parent = parent_plugin,
-            entry = lockfile_entry,
+            entry = build_lockfile_entry(plugin, parent_plugin, existing_lockfile, original_lockfile),
           }
         end
       end
@@ -461,11 +387,7 @@ function M.write_lockfiles_async(opts)
       end
     end
 
-    if Source._test_mode then
-      do_post_index_work()
-    else
-      vim.schedule(do_post_index_work)
-    end
+    vim.schedule(do_post_index_work)
   end)
 end
 
@@ -504,6 +426,24 @@ local function restore_cleaned_plugins(pre_clean_lockfiles)
   end
 end
 
+local function notify_plugin_refresh_results(plugin_names, old_sources)
+  for _, name in ipairs(plugin_names) do
+    local old_repo = old_sources[name] and old_sources[name].repo or nil
+    local new_source = Cache.get_plugin_source(name)
+    local new_repo = new_source and new_source.repo or nil
+
+    if not new_repo then
+      Util.notify("Plugin '" .. name .. "' not found in any configured repository", vim.log.levels.WARN)
+    elseif not old_repo then
+      Util.notify("Detected " .. name .. " source: " .. Util.format_path(new_repo))
+    elseif old_repo ~= new_repo then
+      Util.notify("Moved " .. name .. " from " .. Util.format_path(old_repo) .. " to " .. Util.format_path(new_repo))
+    else
+      Util.notify(name .. " source unchanged (" .. Util.format_path(new_repo) .. ")")
+    end
+  end
+end
+
 function M.refresh_sync(plugin_names)
   if #plugin_names == 0 then
     Util.notify("Refreshing super_lazy cache...")
@@ -533,21 +473,7 @@ function M.refresh_sync(plugin_names)
       return
     end
 
-    for _, name in ipairs(plugin_names) do
-      local old_repo = old_sources[name] and old_sources[name].repo or nil
-      local new_source = Cache.get_plugin_source(name)
-      local new_repo = new_source and new_source.repo or nil
-
-      if not new_repo then
-        Util.notify("Plugin '" .. name .. "' not found in any configured repository", vim.log.levels.WARN)
-      elseif not old_repo then
-        Util.notify("Detected " .. name .. " source: " .. Util.format_path(new_repo))
-      elseif old_repo ~= new_repo then
-        Util.notify("Moved " .. name .. " from " .. Util.format_path(old_repo) .. " to " .. Util.format_path(new_repo))
-      else
-        Util.notify(name .. " source unchanged (" .. Util.format_path(new_repo) .. ")")
-      end
-    end
+    notify_plugin_refresh_results(plugin_names, old_sources)
   end
 end
 
@@ -571,21 +497,7 @@ function M.refresh(plugin_names)
     M.write_lockfiles_async({
       silent = false,
       on_complete = function()
-      for _, name in ipairs(plugin_names) do
-        local old_repo = old_sources[name] and old_sources[name].repo or nil
-        local new_source = Cache.get_plugin_source(name)
-        local new_repo = new_source and new_source.repo or nil
-
-        if not new_repo then
-          Util.notify("Plugin '" .. name .. "' not found in any configured repository", vim.log.levels.WARN)
-        elseif not old_repo then
-          Util.notify("Detected " .. name .. " source: " .. Util.format_path(new_repo))
-        elseif old_repo ~= new_repo then
-          Util.notify("Moved " .. name .. " from " .. Util.format_path(old_repo) .. " to " .. Util.format_path(new_repo))
-        else
-          Util.notify(name .. " source unchanged (" .. Util.format_path(new_repo) .. ")")
-        end
-      end
+        notify_plugin_refresh_results(plugin_names, old_sources)
       end,
     })
   end
