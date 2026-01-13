@@ -110,10 +110,7 @@ local function setup_user_commands()
       local lines = { "Plugin: " .. plugin_name }
       if idx and idx[plugin_name] then
         local entry = idx[plugin_name]
-        table.insert(
-          lines,
-          "  Index: repo=" .. (entry.repo or "nil") .. ", parent=" .. (entry.parent or "nil")
-        )
+        table.insert(lines, "  Index: repo=" .. (entry.repo or "nil") .. ", parent=" .. (entry.parent or "nil"))
       else
         table.insert(lines, "  Index: (not in index)")
       end

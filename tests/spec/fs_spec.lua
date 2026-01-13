@@ -54,5 +54,4 @@ describe("fs module", function()
       assert.is_nil(result_content)
     end)
   end)
-
 end)
