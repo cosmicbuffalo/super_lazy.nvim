@@ -69,4 +69,51 @@ describe("util module", function()
       vim.notify = original_notify
     end)
   end)
+
+  describe("format_path", function()
+    it("should be a function", function()
+      assert.is_function(util.format_path)
+    end)
+
+    it("should replace home directory with tilde", function()
+      local home = vim.fn.expand("~")
+      local path = home .. "/some/path/to/file"
+      local result = util.format_path(path)
+      assert.equals("~/some/path/to/file", result)
+    end)
+
+    it("should return path unchanged if not under home", function()
+      local path = "/tmp/some/path"
+      local result = util.format_path(path)
+      assert.equals("/tmp/some/path", result)
+    end)
+
+    it("should resolve symlinks", function()
+      -- Create a temporary symlink
+      local test_dir = "/tmp/format_path_test_" .. os.time()
+      local real_dir = test_dir .. "/real"
+      local symlink = test_dir .. "/link"
+
+      vim.fn.mkdir(real_dir, "p")
+      vim.fn.system({ "ln", "-s", real_dir, symlink })
+
+      local result = util.format_path(symlink)
+      -- Result should be the resolved path (real_dir), possibly with ~ substitution
+      local expected = real_dir
+      local home = vim.fn.expand("~")
+      if expected:sub(1, #home) == home then
+        expected = "~" .. expected:sub(#home + 1)
+      end
+      assert.equals(expected, result)
+
+      -- Cleanup
+      vim.fn.delete(test_dir, "rf")
+    end)
+
+    it("should handle home directory exactly", function()
+      local home = vim.fn.expand("~")
+      local result = util.format_path(home)
+      assert.equals("~", result)
+    end)
+  end)
 end)

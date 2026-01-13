@@ -1,14 +1,13 @@
 local source = require("super_lazy.source")
 local config = require("super_lazy.config")
-local cache = require("super_lazy.cache")
 
 describe("source module", function()
   before_each(function()
-    cache.clear_all()
+    source.clear_all()
   end)
 
   after_each(function()
-    cache.clear_all()
+    source.clear_all()
   end)
 
   describe("get_lockfile_repo_paths", function()
@@ -110,7 +109,7 @@ describe("source module", function()
     end)
   end)
 
-  describe("get_plugin_source", function()
+  describe("lookup_plugin_in_index", function()
     it("should return first repo path for lazy.nvim", function()
       config.setup({ lockfile_repo_dirs = { "/path1", "/path2" } })
 
@@ -132,12 +131,11 @@ describe("source module", function()
       assert.equals("/path1", source_path)
     end)
 
-    it("should error when plugin not found", function()
+    it("should return error when plugin not found in index", function()
       config.setup({ lockfile_repo_dirs = { "/test" } })
 
       local original_resolve = vim.fn.resolve
       local original_isdirectory = vim.fn.isdirectory
-      local original_glob = vim.fn.glob
 
       vim.fn.resolve = function(path)
         return path
@@ -145,30 +143,301 @@ describe("source module", function()
       vim.fn.isdirectory = function(path)
         return 1
       end
-      vim.fn.glob = function(pattern, nosuf, list)
-        return {}
-      end
 
-      local original_require = require
-      _G.require = function(name)
-        if name == "lazy" then
-          return {
-            plugins = function()
-              return {}
-            end,
-          }
-        end
-        return original_require(name)
-      end
+      -- Clear the index so plugin won't be found
+      source.clear_index()
 
-      assert.has_error(function()
-        source.get_plugin_source("nonexistent-plugin")
-      end)
+      local repo, parent, err = source.get_plugin_source("nonexistent-plugin")
 
       vim.fn.resolve = original_resolve
       vim.fn.isdirectory = original_isdirectory
-      vim.fn.glob = original_glob
-      _G.require = original_require
+
+      assert.is_nil(repo)
+      assert.is_not_nil(err)
+      assert.is_truthy(err:match("not found"))
+    end)
+  end)
+
+  describe("build_index", function()
+    -- Helper to wait for async operations
+    local function wait_for(condition, timeout_ms)
+      timeout_ms = timeout_ms or 5000
+      local ok = vim.wait(timeout_ms, condition, 10)
+      assert(ok, "Timeout waiting for condition")
+    end
+
+    it("should call on_progress callback during indexing", function()
+      local test_dir = "/tmp/super_lazy_build_index_test_" .. os.time()
+      local repo1 = test_dir .. "/repo1"
+
+      vim.fn.mkdir(repo1 .. "/plugins", "p")
+      vim.fn.writefile({
+        "return {",
+        '  { "nvim-lua/plenary.nvim" },',
+        '  { "folke/tokyonight.nvim" },',
+        "}",
+      }, repo1 .. "/plugins/core.lua")
+
+      config.setup({ lockfile_repo_dirs = { repo1 } })
+
+      local progress_calls = {}
+      local done = false
+
+      source.build_index(function(index)
+        done = true
+      end, {
+        on_progress = function(current, total, message)
+          table.insert(progress_calls, { current = current, total = total, message = message })
+        end,
+      })
+
+      wait_for(function()
+        return done
+      end)
+
+      -- Should have received progress callbacks
+      assert.is_true(#progress_calls >= 1)
+      -- First call should indicate starting scan
+      assert.is_truthy(progress_calls[1].message:match("scan") or progress_calls[1].message:match("Scan"))
+
+      vim.fn.delete(test_dir, "rf")
+    end)
+
+    it("should return empty index when no repo paths configured", function()
+      config.setup({ lockfile_repo_dirs = {} })
+
+      local done = false
+      local result_index = nil
+
+      source.build_index(function(index)
+        result_index = index
+        done = true
+      end)
+
+      wait_for(function()
+        return done
+      end)
+
+      assert.is_not_nil(result_index)
+      -- Empty index
+      local count = 0
+      for _ in pairs(result_index) do
+        count = count + 1
+      end
+      assert.equals(0, count)
+    end)
+
+    it("should return empty index when repo has no plugin files", function()
+      local test_dir = "/tmp/super_lazy_empty_repo_test_" .. os.time()
+      local repo1 = test_dir .. "/repo1"
+
+      vim.fn.mkdir(repo1, "p")
+      -- No plugins directory
+
+      config.setup({ lockfile_repo_dirs = { repo1 } })
+
+      local done = false
+      local result_index = nil
+
+      source.build_index(function(index)
+        result_index = index
+        done = true
+      end)
+
+      wait_for(function()
+        return done
+      end)
+
+      assert.is_not_nil(result_index)
+      local count = 0
+      for _ in pairs(result_index) do
+        count = count + 1
+      end
+      assert.equals(0, count)
+
+      vim.fn.delete(test_dir, "rf")
+    end)
+
+    it("should index plugins from multiple files", function()
+      local test_dir = "/tmp/super_lazy_multi_file_test_" .. os.time()
+      local repo1 = test_dir .. "/repo1"
+
+      vim.fn.mkdir(repo1 .. "/plugins", "p")
+      vim.fn.writefile({
+        "return {",
+        '  { "nvim-lua/plenary.nvim" },',
+        "}",
+      }, repo1 .. "/plugins/core.lua")
+      vim.fn.writefile({
+        "return {",
+        '  { "folke/tokyonight.nvim" },',
+        "}",
+      }, repo1 .. "/plugins/theme.lua")
+
+      config.setup({ lockfile_repo_dirs = { repo1 } })
+
+      local done = false
+      local result_index = nil
+
+      source.build_index(function(index)
+        result_index = index
+        done = true
+      end)
+
+      wait_for(function()
+        return done
+      end)
+
+      assert.is_not_nil(result_index["plenary.nvim"])
+      assert.is_not_nil(result_index["tokyonight.nvim"])
+      assert.equals(repo1, result_index["plenary.nvim"].repo)
+      assert.equals(repo1, result_index["tokyonight.nvim"].repo)
+
+      vim.fn.delete(test_dir, "rf")
+    end)
+
+    it("should detect plugins using name= syntax", function()
+      local test_dir = "/tmp/super_lazy_name_syntax_test_" .. os.time()
+      local repo1 = test_dir .. "/repo1"
+
+      vim.fn.mkdir(repo1 .. "/plugins", "p")
+      vim.fn.writefile({
+        "return {",
+        '  { "some/repo", name = "custom-name" },',
+        "}",
+      }, repo1 .. "/plugins/core.lua")
+
+      config.setup({ lockfile_repo_dirs = { repo1 } })
+
+      local done = false
+      local result_index = nil
+
+      source.build_index(function(index)
+        result_index = index
+        done = true
+      end)
+
+      wait_for(function()
+        return done
+      end)
+
+      assert.is_not_nil(result_index["custom-name"])
+      assert.equals(repo1, result_index["custom-name"].repo)
+
+      vim.fn.delete(test_dir, "rf")
+    end)
+
+    it("should detect plugins using dir= syntax", function()
+      local test_dir = "/tmp/super_lazy_dir_syntax_test_" .. os.time()
+      local repo1 = test_dir .. "/repo1"
+
+      vim.fn.mkdir(repo1 .. "/plugins", "p")
+      vim.fn.writefile({
+        "return {",
+        '  { dir = "/path/to/local-plugin" },',
+        "}",
+      }, repo1 .. "/plugins/core.lua")
+
+      config.setup({ lockfile_repo_dirs = { repo1 } })
+
+      local done = false
+      local result_index = nil
+
+      source.build_index(function(index)
+        result_index = index
+        done = true
+      end)
+
+      wait_for(function()
+        return done
+      end)
+
+      assert.is_not_nil(result_index["local-plugin"])
+      assert.equals(repo1, result_index["local-plugin"].repo)
+
+      vim.fn.delete(test_dir, "rf")
+    end)
+  end)
+
+  describe("get_git_info", function()
+    it("should return git info for a plugin", function()
+      local LazyGit = require("lazy.manage.git")
+      local original_info = LazyGit.info
+
+      LazyGit.info = function(dir)
+        if dir == "/tmp/lazy/test-plugin" then
+          return { branch = "main", commit = "abc123" }
+        end
+        return nil
+      end
+
+      local plugin = { name = "test-plugin", dir = "/tmp/lazy/test-plugin" }
+      local git_info = source.get_git_info(plugin)
+
+      LazyGit.info = original_info
+
+      assert.is_not_nil(git_info)
+      assert.equals("main", git_info.branch)
+      assert.equals("abc123", git_info.commit)
+    end)
+
+    it("should cache git info", function()
+      local LazyGit = require("lazy.manage.git")
+      local original_info = LazyGit.info
+      local call_count = 0
+
+      LazyGit.info = function(dir)
+        call_count = call_count + 1
+        return { branch = "main", commit = "abc123" }
+      end
+
+      local plugin = { name = "test-plugin", dir = "/tmp/lazy/cache-test" }
+      local info1 = source.get_git_info(plugin)
+      local info2 = source.get_git_info(plugin)
+
+      LazyGit.info = original_info
+
+      -- Should only call LazyGit.info once due to caching
+      assert.equals(1, call_count)
+      assert.equals(info1.branch, info2.branch)
+      assert.equals(info1.commit, info2.commit)
+    end)
+
+    it("should return nil for plugins without git info", function()
+      local LazyGit = require("lazy.manage.git")
+      local original_info = LazyGit.info
+
+      LazyGit.info = function(dir)
+        return nil
+      end
+
+      local plugin = { name = "no-git-plugin", dir = "/tmp/lazy/no-git" }
+      local git_info = source.get_git_info(plugin)
+
+      LazyGit.info = original_info
+
+      assert.is_nil(git_info)
+    end)
+
+    it("should be cleared by clear_all", function()
+      local LazyGit = require("lazy.manage.git")
+      local original_info = LazyGit.info
+      local call_count = 0
+
+      LazyGit.info = function(dir)
+        call_count = call_count + 1
+        return { branch = "main", commit = "abc123" }
+      end
+
+      local plugin = { name = "test-plugin", dir = "/tmp/lazy/clear-test" }
+      source.get_git_info(plugin)
+      source.clear_all()
+      source.get_git_info(plugin)
+
+      LazyGit.info = original_info
+
+      -- Should call LazyGit.info twice because cache was cleared
+      assert.equals(2, call_count)
     end)
   end)
 end)
