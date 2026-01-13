@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-01-13
+
+First major release! The plugin has been extensively refactored to use an all-new async/non-blocking architecture! The persistent cache for plugin sources is gone and a new in-memory source index has taken its place. The index builds quickly on startup and doesn't block user input at all, unlike the old blocking file scan strategy.
+
+### Added
+- **`:SuperLazyRefresh` command**: Refresh lockfiles with optional plugin name arguments
+  - Clears entire source index and rebuilds when called with no arguments
+  - Selectively refreshes specific plugin names when provided
+  - Useful when moving plugins from personal repos to shared repos (earlier repos in the repo path list)
+  - Also accessible via public api: `require('super_lazy').refresh()`
+- **`:SuperLazyDebug` command**: Inspect plugin source index state for debugging
+- **Progress indicator**: Visual progress feedback during lockfile operations (requires [fidget.nvim](https://github.com/j-hui/fidget.nvim))
+  - Shows percentage-based progress as plugin files are scanned
+  - Animated queue ensures smooth visual updates even when operations complete quickly
+- **Non-blocking I/O**: Async file reading using `vim.uv`/libuv via new `fs.lua` module
+
+### Removed
+- **Persistent plugin source cache**: Replaced with fast in-memory index
+  - Removed `~/.cache/nvim/super_lazy/plugin_sources.json` - no longer needed
+  - Index builds so quickly that disk caching provides no benefit!
+
+### Changed
+- **Public API Tweaks**: Moved two functions previously acessible via `init.lua` to `ops.lua`
+  - `require('super_lazy').write_lockfiles()` has moved to `require('super_lazy.ops').write_lockfiles()`
+  - `require('super_lazy').setup_lazy_hooks()` has moved to `require('super_lazy.ops').setup_lazy_hooks()`
+- **`Cache.clear_all() -> Source.clear_all()`**: Manual cache clear without lockfile write use case has moved
+  - Use cases that would have used `require('super_lazy.cache').clear_all()` before `1.0.0` can switch to `require('super_lazy.source').clear_all()` for a similar effect
+
 ## [0.2.5] - 2026-01-06
 
 - Updated expected `lazy.nvim` version to `11.17.5`
