@@ -260,15 +260,68 @@ function M.write_lockfiles(opts)
         title = "super_lazy",
         message = "Scanning plugins...",
         lsp_client = { name = "super_lazy" },
+        percentage = 0,
       })
     else
       Util.notify("Syncing lockfiles...")
     end
   end
 
+  -- Progress animation queue - shows each update for a minimum duration
+  local progress_queue = {}
+  local is_animating = false
+  local work_complete = false
+  local pending_finish_callback = nil
+  local UPDATE_INTERVAL_MS = 100
+
+  local function process_progress_queue()
+    if #progress_queue == 0 then
+      is_animating = false
+      -- Work finished and queue is empty - call the finish callback
+      if work_complete and pending_finish_callback then
+        pending_finish_callback()
+        pending_finish_callback = nil
+      end
+      return
+    end
+
+    local update = table.remove(progress_queue, 1)
+    if progress then
+      progress:report({ message = update.message, percentage = update.pct })
+    end
+
+    vim.defer_fn(process_progress_queue, UPDATE_INTERVAL_MS)
+  end
+
+  local function queue_progress_update(pct, message)
+    table.insert(progress_queue, { pct = pct, message = message })
+    if not is_animating then
+      is_animating = true
+      process_progress_queue()
+    end
+  end
+
+  local function on_index_progress(current, total, message)
+    if progress and total > 0 then
+      local pct = math.floor((current / total) * 100)
+      queue_progress_update(pct, message)
+    end
+  end
+
+  local function finish_with_animation(finish_callback)
+    -- Queue the final 100% update
+    queue_progress_update(100, "Writing lockfiles...")
+    work_complete = true
+    pending_finish_callback = finish_callback
+    -- If not currently animating, start processing (will call finish_callback when done)
+    if not is_animating and pending_finish_callback then
+      pending_finish_callback()
+      pending_finish_callback = nil
+    end
+  end
+
   Source.build_index(function(index)
     local function do_post_index_work()
-
       local results = {}
       for _, plugin in pairs(all_plugins) do
         local source_repo, parent_plugin, err = Source.lookup_plugin_in_index(plugin.name, true)
@@ -324,19 +377,22 @@ function M.write_lockfiles(opts)
         Util.notify("Error writing lockfiles: " .. tostring(write_err), vim.log.levels.ERROR)
       end
 
-      if progress then
-        progress:finish()
-      elseif not silent then
-        Util.notify("Lockfiles synced")
-      end
+      -- Finish progress animation, then call completion callbacks
+      finish_with_animation(function()
+        if progress then
+          progress:finish()
+        elseif not silent then
+          Util.notify("Lockfiles synced")
+        end
 
-      if on_complete then
-        on_complete()
-      end
+        if on_complete then
+          on_complete()
+        end
+      end)
     end
 
     vim.schedule(do_post_index_work)
-  end)
+  end, { on_progress = on_index_progress })
 end
 
 -- Restores plugins that were uninstalled and removed from the lockfile

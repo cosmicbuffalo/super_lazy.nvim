@@ -68,7 +68,13 @@ function M.get_lockfile_repo_paths()
   return paths
 end
 
-function M.build_index(callback)
+-- opts = {
+--   on_progress = function(current, total, message),  -- Progress callback (optional)
+-- }
+function M.build_index(callback, opts)
+  opts = opts or {}
+  local on_progress = opts.on_progress
+
   local repo_paths = M.get_lockfile_repo_paths()
   local index = {}
   local lazy_path = vim.fn.stdpath("data") .. "/lazy"
@@ -79,8 +85,12 @@ function M.build_index(callback)
     return
   end
 
-  local function process_repo(repo_path, on_repo_done)
-    -- Get other repos (excluding current)
+  -- Count total files across all repos for progress tracking
+  local total_files = 0
+  local files_completed = 0
+  local all_repo_files = {}
+
+  for _, repo_path in ipairs(repo_paths) do
     local other_repos = {}
     local resolved_exclude = vim.fn.resolve(repo_path)
     for _, path in ipairs(repo_paths) do
@@ -90,7 +100,6 @@ function M.build_index(callback)
       end
     end
 
-    -- Get plugin files, filtering out files in other repos
     local files = vim.list_extend(
       vim.fn.glob(repo_path .. "/plugins/**/*.lua", true, true),
       vim.fn.glob(repo_path .. "/**/plugins/**/*.lua", true, true)
@@ -107,8 +116,26 @@ function M.build_index(callback)
       end
       if not is_in_other_repo then
         table.insert(filtered_files, file)
+        total_files = total_files + 1
       end
     end
+    all_repo_files[repo_path] = filtered_files
+  end
+
+  if total_files == 0 then
+    plugin_index = index
+    callback(index)
+    return
+  end
+
+  local function report_progress(message)
+    if on_progress then
+      on_progress(files_completed, total_files, message)
+    end
+  end
+
+  local function process_repo(repo_path, on_repo_done)
+    local filtered_files = all_repo_files[repo_path]
 
     if #filtered_files == 0 then
       on_repo_done()
@@ -120,6 +147,9 @@ function M.build_index(callback)
     local files_pending = #filtered_files
     local function on_file_done()
       files_pending = files_pending - 1
+      files_completed = files_completed + 1
+      report_progress("Scanning plugin files...")
+
       if files_pending == 0 then
         local recipe_plugins_to_check = {}
         for plugin_name, _ in pairs(direct_plugins) do
@@ -185,6 +215,7 @@ function M.build_index(callback)
     end)
   end
 
+  report_progress("Starting scan...")
   process_next_repo()
 end
 
