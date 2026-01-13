@@ -1,11 +1,20 @@
-local Cache = require("super_lazy.cache")
 local Config = require("super_lazy.config")
 local Fs = require("super_lazy.fs")
 local Util = require("super_lazy.util")
 
+local LazyGit = require("lazy.manage.git")
+
 local M = {}
 
 local plugin_index = nil
+local cached_lockfile_repo_paths = nil
+local git_info_cache = {}
+
+function M.clear_all()
+  plugin_index = nil
+  cached_lockfile_repo_paths = nil
+  git_info_cache = {}
+end
 
 function M.clear_index()
   plugin_index = nil
@@ -49,9 +58,8 @@ local function extract_plugin_names(content)
 end
 
 function M.get_lockfile_repo_paths()
-  local cached = Cache.get_lockfile_repo_paths()
-  if cached then
-    return cached
+  if cached_lockfile_repo_paths then
+    return cached_lockfile_repo_paths
   end
 
   local paths = {}
@@ -64,7 +72,7 @@ function M.get_lockfile_repo_paths()
     end
   end
 
-  Cache.set_lockfile_repo_paths(paths)
+  cached_lockfile_repo_paths = paths
   return paths
 end
 
@@ -219,7 +227,7 @@ function M.build_index(callback, opts)
   process_next_repo()
 end
 
-function M.lookup_plugin_in_index(plugin_name, with_recipe)
+function M.get_plugin_source(plugin_name, with_recipe)
   local repo_paths = M.get_lockfile_repo_paths()
 
   -- Return the first repo path for lazy.nvim
@@ -227,24 +235,35 @@ function M.lookup_plugin_in_index(plugin_name, with_recipe)
     return repo_paths[1] or vim.fn.stdpath("config"), nil, nil
   end
 
-  -- Try to get from persistent cache first (validates repo still exists in config)
-  local cached = Cache.get_plugin_source(plugin_name)
-  if cached then
-    for _, repo_path in ipairs(repo_paths) do
-      if repo_path == cached.repo then
-        return cached.repo, cached.parent, nil
-      end
-    end
-  end
-
   -- Look up in the in-memory index
   if plugin_index and plugin_index[plugin_name] then
     local entry = plugin_index[plugin_name]
-    Cache.set_plugin_source(plugin_name, entry.repo, entry.parent)
     return entry.repo, entry.parent, nil
   end
 
-  return nil, nil, "Plugin " .. plugin_name .. " not found in any configured lockfile repository."
+  -- note that if the in-memory index hasn't been built yet we'll return nil here
+  return nil, nil, "Plugin " .. plugin_name .. " not found in source index."
+end
+
+-- Get git info for a plugin directory with caching
+function M.get_git_info(plugin)
+  local git_info = git_info_cache[plugin.dir]
+  if git_info == nil then
+    local info = LazyGit.info(plugin.dir)
+    if info then
+      git_info = {
+        branch = info.branch or LazyGit.get_branch({ dir = plugin.dir, name = plugin.name }),
+        commit = info.commit,
+      }
+      git_info_cache[plugin.dir] = git_info
+    else
+      git_info_cache[plugin.dir] = false
+      git_info = nil
+    end
+  elseif git_info == false then
+    git_info = nil
+  end
+  return git_info
 end
 
 return M
