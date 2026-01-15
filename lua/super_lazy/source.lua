@@ -68,7 +68,9 @@ function M.get_lockfile_repo_paths()
     if vim.fn.isdirectory(real_path) == 1 then
       table.insert(paths, real_path)
     else
-      Util.notify("lockfile_repo_dirs entry is not a valid directory: " .. tostring(dir), vim.log.levels.WARN)
+      if Config.options.debug then
+        Util.notify("lockfile_repo_dirs entry is not a valid directory: " .. tostring(dir), vim.log.levels.WARN)
+      end
     end
   end
 

@@ -957,6 +957,7 @@ describe("super_lazy ops module", function()
       local Config = require("super_lazy.config")
       Config.setup({
         lockfile_repo_dirs = { repo1 },
+        debug = true,
       })
 
       -- Mock lazy.nvim structures
@@ -1051,6 +1052,7 @@ describe("super_lazy ops module", function()
       local Config = require("super_lazy.config")
       Config.setup({
         lockfile_repo_dirs = { repo1 },
+        debug = true,
       })
 
       -- Mock lazy.nvim structures
@@ -1148,6 +1150,7 @@ describe("super_lazy ops module", function()
       local Config = require("super_lazy.config")
       Config.setup({
         lockfile_repo_dirs = { repo1, repo2 },
+        debug = true,
       })
 
       -- Mock lazy.nvim structures
@@ -1258,6 +1261,7 @@ describe("super_lazy ops module", function()
       local Config = require("super_lazy.config")
       Config.setup({
         lockfile_repo_dirs = { repo1 },
+        debug = true,
       })
 
       -- Mock lazy.nvim structures
