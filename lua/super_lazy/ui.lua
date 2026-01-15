@@ -1,3 +1,4 @@
+local Config = require("super_lazy.config")
 local Source = require("super_lazy.source")
 local Util = require("super_lazy.util")
 
@@ -89,14 +90,16 @@ function M.setup_hooks()
       end)
 
       if not custom_ok then
+        if Config.options.debug then
+          Util.notify("Error in UI details hook: " .. tostring(custom_err), vim.log.levels.WARN)
+        end
         -- Fall back to original details function if custom details logic fails
-        Util.notify("Error in UI details hook: " .. tostring(custom_err), vim.log.levels.WARN)
         original_details(self, plugin)
       end
     end
   end)
 
-  if not ok then
+  if not ok and Config.options.debug then
     Util.notify("Failed to setup UI hooks: " .. tostring(err), vim.log.levels.WARN)
   end
 end

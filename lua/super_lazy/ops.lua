@@ -1,3 +1,4 @@
+local Config = require("super_lazy.config")
 local Lockfile = require("super_lazy.lockfile")
 local Source = require("super_lazy.source")
 local UI = require("super_lazy.ui")
@@ -97,7 +98,9 @@ function M.write_lockfiles(opts)
       percentage = 0,
     })
   else
-    Util.notify("Syncing lockfiles...")
+    if Config.options.debug then
+      Util.notify("Syncing lockfiles...")
+    end
   end
 
   -- Progress animation queue - shows each update for a minimum duration
@@ -189,7 +192,7 @@ function M.write_lockfiles(opts)
       end
 
       local write_ok, write_err = pcall(finalize_lockfiles, results, existing_lockfile, original_lockfile)
-      if not write_ok then
+      if not write_ok and Config.options.debug then
         Util.notify("Error writing lockfiles: " .. tostring(write_err), vim.log.levels.ERROR)
       end
 
@@ -197,7 +200,7 @@ function M.write_lockfiles(opts)
       finish_with_animation(function()
         if progress then
           progress:finish()
-        else
+        elseif Config.options.debug then
           Util.notify("Lockfiles synced")
         end
 
@@ -304,7 +307,9 @@ function M.setup_lazy_hooks()
     LazyLock.update = function()
       local original_ok, original_err = pcall(original_update)
       if not original_ok then
-        Util.notify("Error in lazy update: " .. tostring(original_err), vim.log.levels.ERROR)
+        if Config.options.debug then
+          Util.notify("Error in lazy update: " .. tostring(original_err), vim.log.levels.ERROR)
+        end
         return -- Don't try additional lockfile handling if lazy update failed
       end
 
@@ -314,7 +319,9 @@ function M.setup_lazy_hooks()
           if next(pre_clean_lockfiles) ~= nil then
             local restore_ok, restore_err = pcall(restore_cleaned_plugins, pre_clean_lockfiles)
             if not restore_ok then
-              Util.notify("Error restoring cleaned plugins: " .. tostring(restore_err), vim.log.levels.ERROR)
+              if Config.options.debug then
+                Util.notify("Error restoring cleaned plugins: " .. tostring(restore_err), vim.log.levels.ERROR)
+              end
             end
             pre_clean_lockfiles = {}
           end
@@ -349,7 +356,9 @@ function M.setup_lazy_hooks()
           ui_setup_done = true
           local ui_ok, ui_err = pcall(UI.setup_hooks)
           if not ui_ok then
-            Util.notify("Error setting up UI hooks: " .. tostring(ui_err), vim.log.levels.WARN)
+            if Config.options.debug then
+              Util.notify("Error setting up UI hooks: " .. tostring(ui_err), vim.log.levels.WARN)
+            end
             -- Continue silently - original lazy UI behavior is preserved
           end
         end
@@ -357,7 +366,7 @@ function M.setup_lazy_hooks()
     })
   end)
 
-  if not ok then
+  if not ok and Config.options.debug then
     Util.notify("Failed to setup hooks: " .. tostring(err), vim.log.levels.ERROR)
     Util.notify("Falling back to default lazy.nvim behavior", vim.log.levels.WARN)
   end
