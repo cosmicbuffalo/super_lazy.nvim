@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-01-15
+
+### Added
+- **`debug` config option**: New boolean option (default: `false`) to control notification verbosity
+  - When `false`, routine status messages like "Syncing lockfiles..." are suppressed
+  - Error and warning messages are also hidden unless debug mode is enabled
+  - Progress indicator via fidget.nvim still works regardless of this setting
+
+### Changed
+- Most automatic notifications are now hidden by default to reduce noise
+  - "Syncing lockfiles..." / "Lockfiles synced" messages
+  - Error messages for lockfile writes, plugin restoration, and UI hook setup
+  - Invalid `lockfile_repo_dirs` warnings
+
 ## [1.0.0] - 2026-01-13
 
 First major release! The plugin has been extensively refactored to use an all-new async/non-blocking architecture! The persistent cache for plugin sources is gone and a new in-memory source index has taken its place. The index builds quickly on startup and doesn't block user input at all, unlike the old blocking file scan strategy.
