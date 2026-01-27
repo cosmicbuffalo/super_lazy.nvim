@@ -57,13 +57,16 @@ end
 
 -- opts = {
 --   on_complete = function(),  -- Called when all done (optional)
+--   user_triggered = boolean,  -- If true, show progress even when silent (optional)
 -- }
 function M.write_lockfiles(opts)
   local on_complete
+  local user_triggered = false
   if type(opts) == "function" then
     on_complete = opts
   elseif type(opts) == "table" then
     on_complete = opts.on_complete
+    user_triggered = opts.user_triggered or false
   else
     on_complete = nil
   end
@@ -89,16 +92,17 @@ function M.write_lockfiles(opts)
   local original_lockfile = Lockfile.get_cached()
 
   local progress = nil
-  local ok, fidget = pcall(require, "fidget")
-  if ok and fidget.progress and fidget.progress.handle then
-    progress = fidget.progress.handle.create({
-      title = "Lockfile Sync",
-      message = "Scanning plugins...",
-      lsp_client = { name = "super_lazy.nvim" },
-      percentage = 0,
-    })
-  else
-    if Config.options.debug then
+  local show_progress = user_triggered or not Config.options.silent
+  if show_progress then
+    local ok, fidget = pcall(require, "fidget")
+    if ok and fidget.progress and fidget.progress.handle then
+      progress = fidget.progress.handle.create({
+        title = "Lockfile Sync",
+        message = "Scanning plugins...",
+        lsp_client = { name = "super_lazy.nvim" },
+        percentage = 0,
+      })
+    elseif Config.options.debug then
       Util.notify("Syncing lockfiles...")
     end
   end
@@ -255,6 +259,7 @@ function M.refresh(plugin_names)
     Source.clear_all()
 
     M.write_lockfiles({
+      user_triggered = true,
       on_complete = function()
         Util.notify("Refreshed plugin source index and regenerated lockfiles")
       end,
@@ -273,6 +278,7 @@ function M.refresh(plugin_names)
     Source.clear_index()
 
     M.write_lockfiles({
+      user_triggered = true,
       on_complete = function()
         local new_idx = Source.get_index()
         for _, name in ipairs(plugin_names) do
