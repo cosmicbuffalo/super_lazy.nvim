@@ -345,6 +345,17 @@ function M.setup_lazy_hooks()
       end,
     })
 
+    -- Clear caches after lazy restore to avoid stale git info
+    vim.api.nvim_create_autocmd("User", {
+      pattern = "LazyRestore",
+      callback = function()
+        Source.clear_all()
+        if Config.options.debug then
+          Util.notify("Caches cleared after restore")
+        end
+      end,
+    })
+
     -- Defer UI hooks setup until the Lazy UI is actually opened
     -- This avoids loading UI code during startup
     local ui_setup_done = false
