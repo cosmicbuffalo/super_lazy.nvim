@@ -381,28 +381,6 @@ describe("source module", function()
       assert.equals("abc123", git_info.commit)
     end)
 
-    it("should cache git info", function()
-      local LazyGit = require("lazy.manage.git")
-      local original_info = LazyGit.info
-      local call_count = 0
-
-      LazyGit.info = function(dir)
-        call_count = call_count + 1
-        return { branch = "main", commit = "abc123" }
-      end
-
-      local plugin = { name = "test-plugin", dir = "/tmp/lazy/cache-test" }
-      local info1 = source.get_git_info(plugin)
-      local info2 = source.get_git_info(plugin)
-
-      LazyGit.info = original_info
-
-      -- Should only call LazyGit.info once due to caching
-      assert.equals(1, call_count)
-      assert.equals(info1.branch, info2.branch)
-      assert.equals(info1.commit, info2.commit)
-    end)
-
     it("should return nil for plugins without git info", function()
       local LazyGit = require("lazy.manage.git")
       local original_info = LazyGit.info
@@ -419,25 +397,24 @@ describe("source module", function()
       assert.is_nil(git_info)
     end)
 
-    it("should be cleared by clear_all", function()
+    it("should work after clear_all", function()
       local LazyGit = require("lazy.manage.git")
       local original_info = LazyGit.info
-      local call_count = 0
 
       LazyGit.info = function(dir)
-        call_count = call_count + 1
         return { branch = "main", commit = "abc123" }
       end
 
       local plugin = { name = "test-plugin", dir = "/tmp/lazy/clear-test" }
       source.get_git_info(plugin)
       source.clear_all()
-      source.get_git_info(plugin)
+      local git_info = source.get_git_info(plugin)
 
       LazyGit.info = original_info
 
-      -- Should call LazyGit.info twice because cache was cleared
-      assert.equals(2, call_count)
+      -- Should still return valid git info after clear_all
+      assert.is_not_nil(git_info)
+      assert.equals("main", git_info.branch)
     end)
   end)
 end)

@@ -8,12 +8,10 @@ local M = {}
 
 local plugin_index = nil
 local cached_lockfile_repo_paths = nil
-local git_info_cache = {}
 
 function M.clear_all()
   plugin_index = nil
   cached_lockfile_repo_paths = nil
-  git_info_cache = {}
 end
 
 function M.clear_index()
@@ -247,25 +245,16 @@ function M.get_plugin_source(plugin_name)
   return nil, nil, "Plugin " .. plugin_name .. " not found in source index."
 end
 
--- Get git info for a plugin directory with caching
+-- Get git info for a plugin directory
 function M.get_git_info(plugin)
-  local git_info = git_info_cache[plugin.dir]
-  if git_info == nil then
-    local info = LazyGit.info(plugin.dir)
-    if info then
-      git_info = {
-        branch = info.branch or LazyGit.get_branch({ dir = plugin.dir, name = plugin.name }),
-        commit = info.commit,
-      }
-      git_info_cache[plugin.dir] = git_info
-    else
-      git_info_cache[plugin.dir] = false
-      git_info = nil
-    end
-  elseif git_info == false then
-    git_info = nil
+  local info = LazyGit.info(plugin.dir)
+  if info then
+    return {
+      branch = info.branch or LazyGit.get_branch({ dir = plugin.dir, name = plugin.name }),
+      commit = info.commit,
+    }
   end
-  return git_info
+  return nil
 end
 
 return M
