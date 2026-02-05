@@ -36,7 +36,9 @@ Install using lazy.nvim:
     lockfile_repo_dirs = {
       vim.fn.stdpath("config"),
       -- configure additional config repo paths here
-    }
+    },
+    -- set to true to suppress automatic notifications (user-triggered commands still show feedback)
+    silent = false,
   }
 }
 ```
