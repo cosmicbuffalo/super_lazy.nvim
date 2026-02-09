@@ -180,10 +180,14 @@ function M.write_lockfiles(opts)
               end
             end
           else
-            -- For disabled/uninstalled plugins, try to restore from existing lockfile or git HEAD
-            entry = existing_lockfile[plugin.name]
-            if not entry and original_lockfile then
+            -- For disabled/uninstalled plugins, prefer original lockfile (git HEAD) over
+            -- existing lockfile. This is because lazy.nvim preserves stale data for disabled
+            -- plugins in its internal lock state, which can cause branch names to revert to
+            -- old values (e.g., "master" instead of "main" after a repo renames its default branch).
+            if original_lockfile and original_lockfile[plugin.name] then
               entry = original_lockfile[plugin.name]
+            else
+              entry = existing_lockfile[plugin.name]
             end
           end
 
